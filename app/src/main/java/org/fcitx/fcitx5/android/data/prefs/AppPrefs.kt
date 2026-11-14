@@ -153,8 +153,11 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
 
         val showVoiceInputButton =
             switch(R.string.show_voice_input_button, "show_voice_input_button", false)
+        // 默认内置 DashScope 引擎（仍需用户填 API key 才真正可用；
+        // 未填时语音入口走 voice_error_no_api_key 提示）
         val preferredVoiceInput = voiceInputPreference(
-            R.string.preferred_voice_input, "preferred_voice_input", ""
+            R.string.preferred_voice_input, "preferred_voice_input",
+            VoiceInputManager.BUILTIN_PROVIDER_ID
         ) {
             showVoiceInputButton.getValue() ||
                 spaceKeyLongPressBehavior.getValue() in setOf(
@@ -179,10 +182,12 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "ms",
             10
         )
+        // 默认长按空格 = 按住说话（松开结束识别），配合 preferredVoiceInput
+        // 默认内置 DashScope，开箱即得按住空格语音输入
         val spaceKeyLongPressBehavior = enumList(
             R.string.space_long_press_behavior,
             "space_long_press_behavior",
-            SpaceLongPressBehavior.None
+            SpaceLongPressBehavior.VoiceInputHold
         )
         val spaceSwipeMoveCursor =
             switch(R.string.space_swipe_move_cursor, "space_swipe_move_cursor", true)
@@ -439,7 +444,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val voiceInputDashscopeModel = enumList(
             R.string.voice_dashscope_model,
             "voice_input_dashscope_model",
-            DashScopeModelEnum.QwenAudioStreaming
+            DashScopeModelEnum.QwenAudio31Message
         ) {
             VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
         }
