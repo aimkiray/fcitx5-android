@@ -88,3 +88,4 @@ install(DIRECTORY "${PREBUILT_DIR}/chinese-addons-data/pinyinhelper" DESTINATION
 install(DIRECTORY "${PREBUILT_DIR}/libime/table" DESTINATION "${FCITX_INSTALL_PKGDATADIR}" COMPONENT prebuilt-assets)
 install(DIRECTORY "${PREBUILT_DIR}/libime/data/" DESTINATION "${FCITX_INSTALL_DATADIR}/libime" COMPONENT prebuilt-assets)
 install(DIRECTORY "${PREBUILT_DIR}/opencc/data/" DESTINATION "${FCITX_INSTALL_DATADIR}/opencc" COMPONENT prebuilt-assets)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../../dictionaries/" DESTINATION "${FCITX_INSTALL_PKGDATADIR}/pinyin/dictionaries" COMPONENT prebuilt-assets FILES_MATCHING PATTERN "*.dict")
