@@ -147,6 +147,8 @@ dependencies {
     implementation(libs.splitties.views.dsl.recyclerview)
     implementation(libs.splitties.views.recyclerview)
     implementation(libs.aboutlibraries.core)
+    // sherpa-onnx 离线 ASR（SenseVoice）：拷贝自 BiBi app/libs/sherpa-onnx-2.0.1.aar
+    implementation(files("libs/sherpa-onnx-2.0.1.aar"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)

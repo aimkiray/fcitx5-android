@@ -26,6 +26,7 @@ import org.fcitx.fcitx5.android.input.picker.PickerWindow
 import org.fcitx.fcitx5.android.input.popup.EmojiModifier
 import org.fcitx.fcitx5.android.input.voice.SfAsrModelEnum
 import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
+import org.fcitx.fcitx5.android.input.voice.VolcAsrModelEnum
 import org.fcitx.fcitx5.android.utils.DeviceUtil
 import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.utils.vibrator
@@ -512,6 +513,127 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         ) {
             keyboard.preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_SF_PROVIDER_ID
+        }
+
+        // ---- Volc 火山引擎渠道（仅 builtin_volc provider 可见） ----
+
+        // 三 key 全部进 voiceSecrets
+        val voiceInputVolcApiKey =
+            ManagedPreference.PString(
+                voiceSecrets, "voice_input_volc_api_key", ""
+            ).apply { register() }
+        val voiceInputVolcAppKey =
+            ManagedPreference.PString(
+                voiceSecrets, "voice_input_volc_app_key", ""
+            ).apply { register() }
+        val voiceInputVolcAccessKey =
+            ManagedPreference.PString(
+                voiceSecrets, "voice_input_volc_access_key", ""
+            ).apply { register() }
+
+        // 新/旧 auth 切换开关（true=新 auth X-Api-Key，false=旧 auth 双 key）。
+        // 声明须在三个 EditTextPassword init 块之前（规格 §6.4 显示顺序：
+        // 开关 → API Key → App Key → Access Key）
+        val voiceInputVolcUseNewAuth = switch(
+            R.string.voice_volc_use_new_auth,
+            "voice_input_volc_use_new_auth",
+            true
+        ) {
+            keyboard.preferredVoiceInput.getValue() ==
+                VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID
+        }
+
+        init {
+            ManagedPreferenceUi.EditTextPassword(
+                R.string.voice_volc_api_key,
+                voiceInputVolcApiKey.key,
+                "",
+                dataStore = voiceSecretsDataStore,
+                enableUiOn = {
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID &&
+                    voice.voiceInputVolcUseNewAuth.getValue()
+                }
+            ).registerUi()
+            ManagedPreferenceUi.EditTextPassword(
+                R.string.voice_volc_app_key,
+                voiceInputVolcAppKey.key,
+                "",
+                dataStore = voiceSecretsDataStore,
+                enableUiOn = {
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID &&
+                    !voice.voiceInputVolcUseNewAuth.getValue()
+                }
+            ).registerUi()
+            ManagedPreferenceUi.EditTextPassword(
+                R.string.voice_volc_access_key,
+                voiceInputVolcAccessKey.key,
+                "",
+                dataStore = voiceSecretsDataStore,
+                enableUiOn = {
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID &&
+                    !voice.voiceInputVolcUseNewAuth.getValue()
+                }
+            ).registerUi()
+        }
+
+        // 模型选择 enumList
+        val voiceInputVolcModel = enumList(
+            R.string.voice_volc_model,
+            "voice_input_volc_model",
+            VolcAsrModelEnum.DoubaoFileV2
+        ) {
+            keyboard.preferredVoiceInput.getValue() ==
+                VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID
+        }
+
+        // 去口语化开关 enable_ddc
+        val voiceInputVolcDdc = switch(
+            R.string.voice_volc_ddc,
+            "voice_input_volc_ddc",
+            false
+        ) {
+            keyboard.preferredVoiceInput.getValue() ==
+                VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID
+        }
+
+        // ---- SenseVoice 本地渠道（仅 builtin_sensevoice provider 可见） ----
+
+        // 下载/更新模型 Preference（自定义 Preference，触发后台下载）
+        // 由 SenseVoiceModelManager.downloadState StateFlow 驱动 summary 显示状态
+        init {
+            ManagedPreferenceUi.SenseVoiceModelDownload(
+                key = "voice_input_sv_download_model",
+                title = R.string.voice_sv_download_model,
+                enableUiOn = {
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_SV_PROVIDER_ID
+                }
+            ).registerUi()
+        }
+
+        // 镜像源开关（国内用户开，前缀 gh-proxy.com）
+        val voiceInputSvUseMirror = switch(
+            R.string.voice_sv_use_mirror,
+            "voice_input_sv_use_mirror",
+            false
+        ) {
+            keyboard.preferredVoiceInput.getValue() ==
+                VoiceInputManager.BUILTIN_SV_PROVIDER_ID
+        }
+
+        // 删除本地模型 Preference（动作型；释放 228MB 存储 + 卸载识别器）
+        init {
+            ManagedPreferenceUi.SenseVoiceModelDelete(
+                key = "voice_input_sv_clear_model",
+                title = R.string.voice_sv_clear_model,
+                enableUiOn = {
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_SV_PROVIDER_ID
+                }
+            ).registerUi()
         }
     }
 

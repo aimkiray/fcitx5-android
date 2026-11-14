@@ -25,6 +25,8 @@
 # Built application files
 *.apk
 *.aar
+# sherpa-onnx 离线 ASR AAR 依赖（本地 vendored，需入库）
+!/app/libs/*.aar
 *.ap_
 *.aab
 

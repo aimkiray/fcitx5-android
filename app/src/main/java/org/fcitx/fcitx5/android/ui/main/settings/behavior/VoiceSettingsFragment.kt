@@ -10,11 +10,14 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.Preference
 import androidx.preference.PreferenceScreen
+import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceFragment
+import org.fcitx.fcitx5.android.input.voice.SenseVoiceModelManager
 import org.fcitx.fcitx5.android.input.voice.VoiceInputAudioCapture
 
 class VoiceSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().voice) {
@@ -57,6 +60,35 @@ class VoiceSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().v
             }
         }.also { screen.addPreference(it) }
         refreshMicPermissionSummary()
+
+        // SenseVoice 模型下载 Preference：summary 由 downloadState StateFlow 驱动
+        // （collect 挂在 fragment lifecycleScope，随 fragment 销毁自动取消）。
+        // Idle 时按磁盘上模型文件存在性区分"未下载/已就绪"——下载完成过一轮
+        // 后 Ready 状态已在 flow 内；冷启动进入设置页时 flow 仍是 Idle。
+        screen.findPreference<Preference>(SV_DOWNLOAD_PREF_KEY)?.let { pref ->
+            lifecycleScope.launch {
+                SenseVoiceModelManager.downloadState.collect { state ->
+                    pref.summary = when (state) {
+                        is SenseVoiceModelManager.DownloadState.Downloading ->
+                            getString(R.string.voice_sv_model_downloading, state.progressPercent)
+                        SenseVoiceModelManager.DownloadState.Verifying ->
+                            getString(R.string.voice_sv_model_verifying)
+                        SenseVoiceModelManager.DownloadState.Ready ->
+                            getString(R.string.voice_sv_model_status_ready)
+                        is SenseVoiceModelManager.DownloadState.Error ->
+                            getString(R.string.voice_sv_model_error, state.message)
+                        SenseVoiceModelManager.DownloadState.Idle ->
+                            getString(
+                                if (SenseVoiceModelManager.modelFilesExist(pref.context)) {
+                                    R.string.voice_sv_model_status_ready
+                                } else {
+                                    R.string.voice_sv_model_status_missing
+                                }
+                            )
+                    }
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -74,5 +106,10 @@ class VoiceSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().v
                 R.string.voice_mic_permission_denied
             }
         )
+    }
+
+    companion object {
+        /** 与 AppPrefs.Voice 内 SenseVoiceModelDownload 的 key 对齐。 */
+        private const val SV_DOWNLOAD_PREF_KEY = "voice_input_sv_download_model"
     }
 }

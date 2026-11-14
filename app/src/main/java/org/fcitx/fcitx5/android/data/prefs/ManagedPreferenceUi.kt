@@ -7,12 +7,15 @@ package org.fcitx.fcitx5.android.data.prefs
 import android.content.Context
 import android.os.Build
 import android.view.View
+import android.widget.Toast
 import androidx.annotation.StringRes
+import androidx.appcompat.app.AlertDialog
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceDataStore
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.input.voice.SenseVoiceModelManager
 import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
 import org.fcitx.fcitx5.android.ui.main.modified.MySwitchPreference
 import org.fcitx.fcitx5.android.ui.main.settings.DialogSeekBarPreference
@@ -98,13 +101,17 @@ abstract class ManagedPreferenceUi<T : Preference>(
                 "",
                 *systemIds.toTypedArray(),
                 VoiceInputManager.BUILTIN_PROVIDER_ID,
-                VoiceInputManager.BUILTIN_SF_PROVIDER_ID
+                VoiceInputManager.BUILTIN_SF_PROVIDER_ID,
+                VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID,
+                VoiceInputManager.BUILTIN_SV_PROVIDER_ID
             )
             entries = arrayOf(
                 context.getString(R.string.system_default),
                 *systemLabels.toTypedArray(),
                 context.getString(R.string.voice_provider_builtin),
-                context.getString(R.string.voice_provider_siliconflow)
+                context.getString(R.string.voice_provider_siliconflow),
+                context.getString(R.string.voice_provider_volc),
+                context.getString(R.string.voice_provider_sensevoice)
             )
             // shows "(Not Available)" if selected id is not present
             summaryProvider = Preference.SummaryProvider<ListPreference> { preference ->
@@ -113,6 +120,91 @@ abstract class ManagedPreferenceUi<T : Preference>(
                 } else {
                     context.getString(R.string._not_available_)
                 }
+            }
+        }
+    }
+
+    /**
+     * SenseVoice 模型下载 Preference：
+     * - 点击触发 [SenseVoiceModelManager.startDownload]（镜像选项取自 voiceInputSvUseMirror）。
+     * - summary 订阅 [SenseVoiceModelManager.downloadState] StateFlow，显示：
+     *   - Idle（未下载）："未下载，点击下载（约 228 MB）"
+     *   - Downloading(p)："下载中… {p}%"
+     *   - Verifying："校验中…"
+     *   - Ready："已就绪"
+     *   - Error(msg)："失败：{msg}"
+     * - 下载进行中点击：改为取消下载（[SenseVoiceModelManager.cancelDownload]）。
+     *
+     * StateFlow 订阅须在 Preference 挂接到 fragment 后由 fragment 持有
+     * （VoiceSettingsFragment.onPreferenceUiCreated 内 lifecycleScope collect）。
+     */
+    class SenseVoiceModelDownload(
+        key: String,
+        @StringRes
+        val title: Int,
+        enableUiOn: (() -> Boolean)? = null
+    ) : ManagedPreferenceUi<Preference>(key, enableUiOn) {
+
+        override fun createUi(context: Context): Preference = Preference(context).apply {
+            key = this@SenseVoiceModelDownload.key
+            isIconSpaceReserved = false
+            isSingleLineTitle = false
+            setTitle(this@SenseVoiceModelDownload.title)
+            // 初始 summary；后续由 fragment 侧 collect downloadState 更新
+            summary = context.getString(R.string.voice_sv_model_status_missing)
+            setOnPreferenceClickListener {
+                when (SenseVoiceModelManager.downloadState.value) {
+                    is SenseVoiceModelManager.DownloadState.Downloading,
+                    is SenseVoiceModelManager.DownloadState.Verifying -> {
+                        SenseVoiceModelManager.cancelDownload()
+                    }
+                    else -> {
+                        val prefs = AppPrefs.getInstance()
+                        val useMirror = prefs.voice.voiceInputSvUseMirror.getValue()
+                        SenseVoiceModelManager.startDownload(it.context, useMirror)
+                    }
+                }
+                true
+            }
+        }
+    }
+
+    /**
+     * 删除本地模型 Preference：
+     * - 点击调 [SenseVoiceModelManager.deleteModel]（删除模型目录文件 +
+     *   SenseVoiceRecognizerManager.unload() + downloadState 回 Idle），
+     *   幂等；删除后 toast `voice_sv_model_deleted`。
+     * - summary 固定 `voice_sv_clear_model_summary`（"释放约 228 MB 存储空间"）。
+     */
+    class SenseVoiceModelDelete(
+        key: String,
+        @StringRes
+        val title: Int,
+        enableUiOn: (() -> Boolean)? = null
+    ) : ManagedPreferenceUi<Preference>(key, enableUiOn) {
+
+        override fun createUi(context: Context): Preference = Preference(context).apply {
+            key = this@SenseVoiceModelDelete.key
+            isIconSpaceReserved = false
+            isSingleLineTitle = false
+            setTitle(this@SenseVoiceModelDelete.title)
+            setSummary(R.string.voice_sv_clear_model_summary)
+            setOnPreferenceClickListener { pref ->
+                // 删除前先弹确认（释放 ~228MB，可重新下载）——评审 B-N5
+                AlertDialog.Builder(pref.context)
+                    .setTitle(R.string.voice_sv_clear_model)
+                    .setMessage(R.string.voice_sv_clear_model_confirm)
+                    .setPositiveButton(android.R.string.ok) { _, _ ->
+                        SenseVoiceModelManager.deleteModel(pref.context)
+                        Toast.makeText(
+                            pref.context,
+                            R.string.voice_sv_model_deleted,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+                true
             }
         }
     }

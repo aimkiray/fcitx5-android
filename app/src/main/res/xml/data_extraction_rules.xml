@@ -4,6 +4,15 @@
         <exclude
             domain="sharedpref"
             path="voice_secrets.xml" />
+        <!-- SenseVoice 本地 ASR 模型目录（~228MB）：位于 getExternalFilesDir，
+             对应 external 域；不入云备份（损坏凭下载器重下恢复） -->
+        <exclude
+            domain="external"
+            path="sensevoice/" />
+        <!-- 外存不可用时模型回退 filesDir/sensevoice/，同样排除 -->
+        <exclude
+            domain="file"
+            path="sensevoice/" />
         <exclude
             domain="file"
             path="usr" />
@@ -21,6 +30,12 @@
         <exclude
             domain="sharedpref"
             path="voice_secrets.xml" />
+        <exclude
+            domain="external"
+            path="sensevoice/" />
+        <exclude
+            domain="file"
+            path="sensevoice/" />
         <exclude
             domain="file"
             path="usr" />

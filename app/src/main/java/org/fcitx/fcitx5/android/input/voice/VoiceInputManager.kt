@@ -26,6 +26,8 @@ import kotlinx.coroutines.launch
 object VoiceInputManager {
     const val BUILTIN_PROVIDER_ID = "builtin_dashscope"
     const val BUILTIN_SF_PROVIDER_ID = "builtin_siliconflow"
+    const val BUILTIN_VOLC_PROVIDER_ID = "builtin_volc"
+    const val BUILTIN_SV_PROVIDER_ID = "builtin_sensevoice"
 
     // ---- 状态机 ----
     private enum class State { IDLE, LISTENING, STOPPING }
@@ -36,6 +38,17 @@ object VoiceInputManager {
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var capture: VoiceInputAudioCapture? = null
     @Volatile private var engine: StreamingAsrEngine? = null
+
+    /**
+     * 已进入终止流程但尚未收口的引擎引用（评审 A-M2 修订）：
+     * 正常 stopSession 把 `engine` 置空后，SF/Volc 上传、SV 解码可能仍在途；
+     * 此时 discard 路径（onStartInput/onFinishInputView/onDestroy）需要经此
+     * 引用调 `cancel()` 真正中断在途上传（`call.cancel()`），否则已废弃
+     * 会话的音频照常外发第三方。
+     * 置位：stopSession 非 cancel 路径；清位：onFinal/onError 收口、
+     * capture.onError、discard 路径取用后、startSession 新会话开始。
+     */
+    @Volatile private var stoppingEngine: StreamingAsrEngine? = null
 
     /**
      * 会话代次：startSession 成功入口递增，回调构造时捕获。
@@ -81,7 +94,10 @@ object VoiceInputManager {
     // ---- 公开方法 ----
 
     fun isBuiltinId(id: String): Boolean =
-        id == BUILTIN_PROVIDER_ID || id == BUILTIN_SF_PROVIDER_ID
+        id == BUILTIN_PROVIDER_ID ||
+            id == BUILTIN_SF_PROVIDER_ID ||
+            id == BUILTIN_VOLC_PROVIDER_ID ||
+            id == BUILTIN_SV_PROVIDER_ID
 
     fun isActive(): Boolean = state != State.IDLE
 
@@ -113,11 +129,28 @@ object VoiceInputManager {
                     BUILTIN_SF_PROVIDER_ID ->
                         prefs.voice.voiceInputSfApiKey.getValue().isBlank() &&
                             BuildConfig.SF_FREE_API_KEY.isBlank()
+                    BUILTIN_VOLC_PROVIDER_ID -> {
+                        // 双 auth 任一组就绪即可
+                        val v = prefs.voice
+                        if (v.voiceInputVolcUseNewAuth.getValue()) {
+                            v.voiceInputVolcApiKey.getValue().isBlank()
+                        } else {
+                            v.voiceInputVolcAppKey.getValue().isBlank() ||
+                                v.voiceInputVolcAccessKey.getValue().isBlank()
+                        }
+                    }
+                    BUILTIN_SV_PROVIDER_ID -> {
+                        // 模型就绪检查（轻量存在性；完整 sha256 在 stop() IO 协程内做，
+                        // 严禁在主线程对 228MB 文件做 sha256——会 ANR）
+                        !SenseVoiceModelManager.modelFilesExist(service)
+                    }
                     else -> false
                 }
                 if (keyMissing) {
                     val msgRes = when (providerId) {
                         BUILTIN_SF_PROVIDER_ID -> R.string.voice_error_sf_unavailable
+                        BUILTIN_VOLC_PROVIDER_ID -> R.string.voice_error_volc_unavailable
+                        BUILTIN_SV_PROVIDER_ID -> R.string.voice_error_sv_model_missing
                         else -> R.string.voice_error_no_api_key
                     }
                     voiceErrorCallback?.invoke(service.getString(msgRes))
@@ -128,7 +161,7 @@ object VoiceInputManager {
                 true
             }
             State.LISTENING, State.STOPPING -> {
-                stopSession()
+                stopSession(service)
                 true
             }
         }
@@ -144,7 +177,7 @@ object VoiceInputManager {
         this.discardFinal = discardFinal
         // discardFinal=true 即废弃会话：引擎走 cancel() 直接丢弃结果
         // （SF 不再把整段音频上传第三方后再丢弃），而非 stop() 正常收尾
-        stopSession(cancel = discardFinal)
+        stopSession(service, cancel = discardFinal)
     }
 
     private fun startSession(service: FcitxInputMethodService) {
@@ -160,6 +193,9 @@ object VoiceInputManager {
         val gen = sessionGen
         discardFinal = false
         sessionReady = false
+        // 上一会话若在终止途中从未回调（如被取消的 SV 解码），其引用在此
+        // 丢弃——迟到的回调已由 sessionGen 守卫作废，继续持有只会泄漏
+        stoppingEngine = null
         // 上一会话可能异常残留 voiceComposingActive 标记；先复位，
         // 否则它会误清新会话写出的真实 preedit
         service.clearVoiceComposingText()
@@ -175,6 +211,10 @@ object VoiceInputManager {
         val prefs = AppPrefs.getInstance()
         val providerId = prefs.keyboard.preferredVoiceInput.getValue()
 
+        // start() 失败回滚时的双 toast 防护（评审 A-L4）：四个引擎的 start()
+        // 校验失败都会同步调 onError（已带具体错误文案），回滚分支据此
+        // 跳过通用 voice_error_failed 补刀
+        var startErrorEmitted = false
         val engineInstance: StreamingAsrEngine = when (providerId) {
             BUILTIN_PROVIDER_ID -> {
                 val apiKey = prefs.voice.voiceInputDashscopeApiKey.getValue()
@@ -197,7 +237,7 @@ object VoiceInputManager {
                     prompt = "",
                     wsRealtimeUrl = "wss://maas.qianwenaiapi.com/api-ws/v1/realtime",
                     wsInferenceUrl = "wss://maas.qianwenaiapi.com/api-ws/v1/inference",
-                    listener = engineListener(service, gen)
+                    listener = engineListener(service, gen) { startErrorEmitted = true }
                 )
             }
             BUILTIN_SF_PROVIDER_ID -> {
@@ -208,7 +248,33 @@ object VoiceInputManager {
                     scope = scope,
                     userApiKey = userKey,
                     model = model,
-                    listener = engineListener(service, gen)
+                    listener = engineListener(service, gen) { startErrorEmitted = true }
+                )
+            }
+            BUILTIN_VOLC_PROVIDER_ID -> {
+                val v = prefs.voice
+                val auth = VolcAuthValues(
+                    useNewAuth = v.voiceInputVolcUseNewAuth.getValue(),
+                    apiKey = v.voiceInputVolcApiKey.getValue(),
+                    appKey = v.voiceInputVolcAppKey.getValue(),
+                    accessKey = v.voiceInputVolcAccessKey.getValue()
+                )
+                val model = v.voiceInputVolcModel.getValue()
+                val enableDdc = v.voiceInputVolcDdc.getValue()
+                VolcFileAsrEngine(
+                    context = service,
+                    scope = scope,
+                    auth = auth,
+                    model = model,
+                    enableDdc = enableDdc,
+                    listener = engineListener(service, gen) { startErrorEmitted = true }
+                )
+            }
+            BUILTIN_SV_PROVIDER_ID -> {
+                SenseVoiceFileAsrEngine(
+                    context = service,
+                    scope = scope,
+                    listener = engineListener(service, gen) { startErrorEmitted = true }
                 )
             }
             else -> {
@@ -257,10 +323,12 @@ object VoiceInputManager {
                     service.clearVoiceComposingText()
                     // 异步死采集后字段不能残留（否则 stopSession 拿到野实例）；
                     // capture 死后引擎必须收尾：cancel 丢弃结果并释放资源
-                    // （防 WS 泄漏；SF 不再把已废弃音频上传第三方）
+                    // （防 WS 泄漏；SF 不再把已废弃音频上传第三方）。
+                    // 若 stopSession 已把引用移交 stoppingEngine，同样须够到
                     capture = null
-                    val e = engine
+                    val e = engine ?: stoppingEngine
                     engine = null
+                    stoppingEngine = null
                     scope.launch { e?.cancel() }
                     state = State.IDLE
                     sessionReady = false
@@ -284,8 +352,9 @@ object VoiceInputManager {
             // start() 异常或 isRunning=false 时 WS 握手可能已建立连接，
             // 显式 stop 回滚防泄漏；onError 若已被调用此 stop 为幂等双保险
             runCatching { engineInstance.stop() }
-            // onError 未触发的失败路径（异常先于回调挂接）无用户反馈，补一条
-            if (gen == sessionGen) {
+            // 引擎 start() 已同步 onError 过的失败不再补通用 toast（防双弹）；
+            // 仅 onError 未触发的路径（异常先于回调挂接）补一条
+            if (gen == sessionGen && !startErrorEmitted) {
                 voiceErrorCallback?.invoke(service.getString(R.string.voice_error_failed))
             }
             // show 已触发：覆盖层随回滚收起（onError 的 post 也会 hide，幂等双保险）
@@ -323,7 +392,8 @@ object VoiceInputManager {
      */
     private fun engineListener(
         service: FcitxInputMethodService,
-        gen: Int
+        gen: Int,
+        onErrorDispatched: () -> Unit = {}
     ): StreamingAsrEngine.Listener = object : StreamingAsrEngine.Listener {
         override fun onPartial(text: String) {
             mainHandler.post {
@@ -341,6 +411,7 @@ object VoiceInputManager {
             val c = capture
             capture = null
             engine = null
+            stoppingEngine = null
             scope.launch { c?.stop() }
             mainHandler.post {
                 if (gen != sessionGen) return@post
@@ -355,10 +426,14 @@ object VoiceInputManager {
             }
         }
         override fun onError(message: String) {
+            // 标记须在 gen 检查前：start() 同步 onError 时回滚分支据此跳过
+            // 通用错误补刀；旧会话迟到 onError 写此标志无害（捕获变量已死）
+            onErrorDispatched()
             if (gen != sessionGen) return
             val c = capture
             capture = null
             engine = null
+            stoppingEngine = null
             scope.launch { c?.stop() }
             mainHandler.post {
                 if (gen != sessionGen) return@post
@@ -374,7 +449,7 @@ object VoiceInputManager {
         }
     }
 
-    private fun stopSession(cancel: Boolean = false) {
+    private fun stopSession(service: FcitxInputMethodService, cancel: Boolean = false) {
         state = State.STOPPING
         // 会话进入终止流程即视为"未就绪"：isListening() 已不含 STOPPING，
         // 窗口重建不再补建覆盖层；此复位保证残留的 isSessionReady() 读到 false
@@ -385,15 +460,30 @@ object VoiceInputManager {
         // 协程执行，保持"先停采集、再让引擎 commit"的顺序且不阻塞主线程
         val c = capture
         capture = null
-        val e = engine
+        // discard 重入时 engine 已被首次 stopSession 置空：经 stoppingEngine
+        // 取回在途引擎（SF/Volc 上传、SV 解码），保证 cancel() 可达（A-M2）
+        val e = engine ?: stoppingEngine
         // 与 capture 对称置空：STOPPING 期间字段不得残留引擎引用，
         // 防止 stop() 重入或清理路径拿到野实例重复 stop
         engine = null
+        if (cancel) {
+            stoppingEngine = null
+            // 废弃会话不依赖引擎回调收口（被取消的 SV 解码不会回调；
+            // SF/Volc 取消触发的 onError 对本会话也已无意义）：
+            // 作废本 gen 全部迟到回调（防错误 toast/迟到 final 上屏），直接收口
+            sessionGen++
+            state = State.IDLE
+            service.clearVoiceComposingText()
+        } else {
+            // 正常停止：引擎引用移交 stoppingEngine 直至 onFinal/onError
+            // 收口，期间 discard 重入仍可经它 cancel 到在途上传
+            stoppingEngine = e
+        }
         scope.launch {
             c?.stop()
             if (cancel) {
                 // 废弃会话：cancel() 丢弃结果、不上屏不上传
-                // （DashScope 默认实现即 stop()；SF 见引擎 cancel 注释）
+                // （DashScope 默认实现即 stop()；SF/Volc 中断在途 call）
                 e?.cancel()
             } else {
                 // engine.stop() 触发 recognizer.stop()/conversation.commit()
@@ -401,6 +491,6 @@ object VoiceInputManager {
                 e?.stop()
             }
         }
-        // onFinal/onError 回调会将 state 设回 IDLE（cancel 路径经空 final 收口）
+        // 非 cancel 路径由 onFinal/onError 回调将 state 设回 IDLE
     }
 }

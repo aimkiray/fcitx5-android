@@ -337,7 +337,7 @@
     <string name="voice_mic_permission">Microphone permission</string>
     <string name="voice_mic_permission_granted">Granted</string>
     <string name="voice_mic_permission_denied">Not granted, tap to request</string>
-    <string name="voice_settings_hint">Set “Preferred voice input” to a built-in service (DashScope or SiliconFlow) in keyboard settings first</string>
+    <string name="voice_settings_hint">Set “Preferred voice input” to a built-in service in keyboard settings first</string>
     <string name="voice_preview_mode">Recognition preview in editor</string>
     <string name="voice_preview_mode_auto">Auto (off for incompatible apps)</string>
     <string name="voice_preview_mode_always">Always show</string>
@@ -358,4 +358,44 @@
     <string name="voice_error_sf_unavailable">SiliconFlow free service unavailable. Please configure an API key in Settings.</string>
     <string name="voice_error_sf_http">SiliconFlow request failed (HTTP %1$d: %2$s)</string>
     <string name="voice_error_sf_timeout">SiliconFlow upload timed out</string>
+    <!-- Voice provider entries -->
+    <string name="voice_provider_volc">Doubao / Volcengine</string>
+    <string name="voice_provider_sensevoice">Local SenseVoice (Offline)</string>
+
+    <!-- Volc error strings -->
+    <string name="voice_error_volc_unavailable">Volcengine ASR: no credentials configured</string>
+    <string name="voice_error_volc_timeout">Volcengine ASR timed out (45 s)</string>
+    <string name="voice_error_volc_http">Volcengine ASR error %1$d: %2$s</string>
+
+    <!-- SenseVoice error strings -->
+    <string name="voice_error_sv_model_missing">Local model not ready, download it in settings first</string>
+    <string name="voice_error_sv_integrity">Local model file corrupted: %1$s. Re-download in settings.</string>
+
+    <!-- Volc prefs titles -->
+    <string name="voice_volc_use_new_auth">Use new auth (X-Api-Key)</string>
+    <string name="voice_volc_api_key">API Key</string>
+    <string name="voice_volc_app_key">App Key</string>
+    <string name="voice_volc_access_key">Access Key</string>
+    <string name="voice_volc_model">Model</string>
+    <string name="voice_volc_ddc">Remove disfluency (enable_ddc)</string>
+
+    <!-- Volc model entries -->
+    <string name="voice_volc_model_file_v2">Doubao v2 (SeedASR, recommended)</string>
+    <string name="voice_volc_model_file_v1">Doubao v1 (BigASR)</string>
+    <string name="voice_volc_model_file_turbo_v1">Doubao Turbo v1 (BigASR Turbo)</string>
+
+    <!-- SenseVoice prefs titles -->
+    <string name="voice_sv_download_model">Download / Update Model</string>
+    <string name="voice_sv_use_mirror">Use China mirror (gh-proxy.com)</string>
+    <string name="voice_sv_clear_model">Delete local model</string>
+    <string name="voice_sv_clear_model_summary">Free ~228 MB of storage</string>
+    <string name="voice_sv_clear_model_confirm">Delete the local model? This frees ~228 MB of storage. You can re-download it later.</string>
+    <string name="voice_sv_model_deleted">Local model deleted</string>
+
+    <!-- SenseVoice model status summaries -->
+    <string name="voice_sv_model_status_missing">Not downloaded — tap to download (~228 MB)</string>
+    <string name="voice_sv_model_status_ready">Ready</string>
+    <string name="voice_sv_model_downloading">Downloading… %1$d%% (tap to cancel)</string>
+    <string name="voice_sv_model_verifying">Verifying…</string>
+    <string name="voice_sv_model_error">Failed: %1$s (tap to retry)</string>
 </resources>
