@@ -143,14 +143,14 @@ class DataDescriptorPlugin : Plugin<Project> {
                 val key = relativeFile.path.replace(File.separatorChar, '/')
                 if (change.changeType == ChangeType.REMOVED || key in excludes.get()) {
                     map.remove(key)
-                } else {
+                } else if (change.file.isFile) {
                     map[key] = sha256(change.file)
                 }
             }
             // calculate dirs
             inputDir.asFileTree.forEach {
                 it.relativeTo(file.parentFile).allParents().forEach { p ->
-                    map[p.path] = ""
+                    map[p.path.replace(File.separatorChar, '/')] = ""
                 }
             }
             serialize(map.toSortedMap(), symlinks.get())

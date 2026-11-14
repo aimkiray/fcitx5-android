@@ -45,7 +45,11 @@ object DataManager {
 
     // should be consistent with the deserialization in DataDescriptorPlugin (:build-logic)
     private fun deserializeDataDescriptor(raw: String): DataDescriptor {
-        return json.decodeFromString<DataDescriptor>(raw)
+        return json.decodeFromString<DataDescriptor>(raw).let { d ->
+            // directory keys were written with the platform-specific separator
+            // by older builds; normalize so upgrades don't diff-ghost them
+            d.copy(files = d.files.mapKeys { (k, _) -> k.replace('\\', '/') })
+        }
     }
 
     private fun serializeDataDescriptor(descriptor: DataDescriptor): String {
