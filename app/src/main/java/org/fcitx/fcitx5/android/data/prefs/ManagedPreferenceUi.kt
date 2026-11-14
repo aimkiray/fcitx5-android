@@ -90,19 +90,21 @@ abstract class ManagedPreferenceUi<T : Preference>(
             setTitle(this@VoiceInputList.title)
             setDialogTitle(this@VoiceInputList.title)
             val voiceInputMethods = InputMethodUtil.listVoiceInputMethods()
-            // system voice input methods + the built-in DashScope engine
+            // system voice input methods + the built-in ASR engines
             val systemIds = voiceInputMethods.map { it.first.id }
             val systemLabels =
                 voiceInputMethods.map { it.first.loadLabel(context.packageManager) }
             entryValues = arrayOf(
                 "",
                 *systemIds.toTypedArray(),
-                VoiceInputManager.BUILTIN_PROVIDER_ID
+                VoiceInputManager.BUILTIN_PROVIDER_ID,
+                VoiceInputManager.BUILTIN_SF_PROVIDER_ID
             )
             entries = arrayOf(
                 context.getString(R.string.system_default),
                 *systemLabels.toTypedArray(),
-                context.getString(R.string.voice_provider_builtin)
+                context.getString(R.string.voice_provider_builtin),
+                context.getString(R.string.voice_provider_siliconflow)
             )
             // shows "(Not Available)" if selected id is not present
             summaryProvider = Preference.SummaryProvider<ListPreference> { preference ->

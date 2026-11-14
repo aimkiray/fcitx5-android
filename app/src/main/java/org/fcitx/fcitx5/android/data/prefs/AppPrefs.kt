@@ -24,6 +24,7 @@ import org.fcitx.fcitx5.android.input.keyboard.SpaceLongPressBehavior
 import org.fcitx.fcitx5.android.input.keyboard.SwipeSymbolDirection
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
 import org.fcitx.fcitx5.android.input.popup.EmojiModifier
+import org.fcitx.fcitx5.android.input.voice.SfAsrModelEnum
 import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
 import org.fcitx.fcitx5.android.utils.DeviceUtil
 import org.fcitx.fcitx5.android.utils.appContext
@@ -428,15 +429,17 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             ).apply { register() }
 
         init {
-            // CTO 修订（评审 M2）：三项 enableUiOn 统一为 builtin 被选中即可见
-            // （不绑定 showVoiceInputButton，空格长按用户也需要配置入口）。
+            // CTO 修订（评审 M2）：enableUiOn 不绑定 showVoiceInputButton，
+            // 空格长按用户也需要配置入口；provider 细化后各项仅在对应
+            // builtin provider 被选中时可见（DashScope 三件套 ↔ SF 两件套）。
             ManagedPreferenceUi.EditTextPassword(
                 R.string.voice_dashscope_api_key,
                 voiceInputDashscopeApiKey.key,
                 "",
                 dataStore = voiceSecretsDataStore,
                 enableUiOn = {
-                    VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_PROVIDER_ID
                 }
             ).registerUi()
         }
@@ -446,7 +449,8 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_dashscope_model",
             DashScopeModelEnum.QwenAudio31Message
         ) {
-            VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+            keyboard.preferredVoiceInput.getValue() ==
+                VoiceInputManager.BUILTIN_PROVIDER_ID
         }
 
         // partial 文本在编辑器内的实时预览模式（详见 FcitxInputMethodService
@@ -457,7 +461,8 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_preview_mode",
             VoicePreviewMode.Auto
         ) {
-            VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+            keyboard.preferredVoiceInput.getValue() ==
+                VoiceInputManager.BUILTIN_PROVIDER_ID
         }
 
         // UI：EditTextString 普通输入。
@@ -473,9 +478,40 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "",
                 hint = R.string.voice_dashscope_language_hint,
                 enableUiOn = {
-                    VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_PROVIDER_ID
                 }
             ).registerUi()
+        }
+
+        // ---- SiliconFlow 免费渠道（仅 builtin_siliconflow provider 可见） ----
+
+        // UI：EditTextPassword 掩码输入；与 DashScope key 同存 voice_secrets。
+        val voiceInputSfApiKey =
+            ManagedPreference.PString(
+                voiceSecrets, "voice_input_sf_api_key", ""
+            ).apply { register() }
+
+        init {
+            ManagedPreferenceUi.EditTextPassword(
+                R.string.voice_sf_api_key,
+                voiceInputSfApiKey.key,
+                "",
+                dataStore = voiceSecretsDataStore,
+                enableUiOn = {
+                    keyboard.preferredVoiceInput.getValue() ==
+                        VoiceInputManager.BUILTIN_SF_PROVIDER_ID
+                }
+            ).registerUi()
+        }
+
+        val voiceInputSfModel = enumList(
+            R.string.voice_sf_model,
+            "voice_input_sf_model",
+            SfAsrModelEnum.SenseVoiceSmall
+        ) {
+            keyboard.preferredVoiceInput.getValue() ==
+                VoiceInputManager.BUILTIN_SF_PROVIDER_ID
         }
     }
 

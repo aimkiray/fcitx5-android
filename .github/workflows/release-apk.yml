@@ -54,6 +54,7 @@ jobs:
           SIGN_KEY_BASE64: ${{ secrets.SIGN_KEY_BASE64 }}
           SIGN_KEY_PWD: ${{ secrets.SIGN_KEY_PWD }}
           SIGN_KEY_ALIAS: ${{ secrets.SIGN_KEY_ALIAS }}
+          SF_FREE_API_KEY: ${{ secrets.SF_FREE_API_KEY }}
         run: ./gradlew :app:assembleRelease
 
       - name: Resolve tag and collect APKs

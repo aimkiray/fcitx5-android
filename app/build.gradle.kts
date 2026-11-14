@@ -31,11 +31,26 @@ android {
                 )
             }
         }
+
+        // 内置 SiliconFlow 免费 API key（GitHub Secret SF_FREE_API_KEY 注入；缺失时为空串）
+        // providers.environmentVariable：配置缓存友好；转义防 secret 含
+        // 引号/反斜杠/换行破坏生成的 BuildConfig.java
+        val sfFreeApiKey = providers.environmentVariable("SF_FREE_API_KEY").orNull.orEmpty()
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "")
+            .replace("\r", "")
+        buildConfigField(
+            "String",
+            "SF_FREE_API_KEY",
+            "\"$sfFreeApiKey\""
+        )
     }
 
     buildFeatures {
         viewBinding = true
         resValues = true
+        buildConfig = true
     }
 
     buildTypes {

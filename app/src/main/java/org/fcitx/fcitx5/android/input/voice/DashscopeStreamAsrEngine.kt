@@ -532,7 +532,7 @@ class DashscopeStreamAsrEngine(
      * 冲刷发送，调用方不得在传入后继续复写该数组（VoiceInputManager 已用
      * copyOfRange 从 AudioRecord 复用 buf 切出专属帧，故此处不再二次拷贝）。
      */
-    fun appendPcm(pcm: ByteArray) {
+    override fun appendPcm(pcm: ByteArray) {
         if (!running.get()) return
         // 不调用 VAD/leveler；振幅由 VoiceInputAudioCapture.onLevel 经 VoiceInputManager 分发
         if (!recognizerReady) {

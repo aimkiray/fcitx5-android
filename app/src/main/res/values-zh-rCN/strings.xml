@@ -337,7 +337,7 @@
     <string name="voice_mic_permission">麦克风权限</string>
     <string name="voice_mic_permission_granted">已授予</string>
     <string name="voice_mic_permission_denied">未授予，点击申请</string>
-    <string name="voice_settings_hint">需先在键盘设置中将“首选语音输入”选为“内置（DashScope）”</string>
+    <string name="voice_settings_hint">需先在键盘设置中将“首选语音输入”选为内置服务（DashScope 或 SiliconFlow）</string>
     <string name="voice_preview_mode">识别文字实时预览</string>
     <string name="voice_preview_mode_auto">自动（不兼容应用不预览）</string>
     <string name="voice_preview_mode_always">总是预览</string>
@@ -350,4 +350,12 @@
     <string name="voice_model_qwen_audio_31_streaming">Qwen-Audio 3.1 流式</string>
     <string name="voice_model_qwen_audio_31_message">Qwen-Audio 3.1 消息</string>
     <string name="voice_model_qwen3_realtime">Qwen3-ASR 实时</string>
+    <string name="voice_provider_siliconflow">SiliconFlow 免费服务</string>
+    <string name="voice_sf_api_key">SiliconFlow API Key</string>
+    <string name="voice_sf_model">SiliconFlow 识别模型</string>
+    <string name="voice_sf_model_sensevoice">SenseVoiceSmall（免费）</string>
+    <string name="voice_sf_model_telespeech">TeleSpeechASR（免费）</string>
+    <string name="voice_error_sf_unavailable">SiliconFlow 免费服务不可用，请在设置中配置 API Key</string>
+    <string name="voice_error_sf_http">SiliconFlow 请求失败（HTTP %1$d：%2$s）</string>
+    <string name="voice_error_sf_timeout">SiliconFlow 上传超时</string>
 </resources>

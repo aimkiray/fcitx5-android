@@ -337,7 +337,7 @@
     <string name="voice_mic_permission">Microphone permission</string>
     <string name="voice_mic_permission_granted">Granted</string>
     <string name="voice_mic_permission_denied">Not granted, tap to request</string>
-    <string name="voice_settings_hint">Set “Preferred voice input” to “Built-in (DashScope)” in keyboard settings first</string>
+    <string name="voice_settings_hint">Set “Preferred voice input” to a built-in service (DashScope or SiliconFlow) in keyboard settings first</string>
     <string name="voice_preview_mode">Recognition preview in editor</string>
     <string name="voice_preview_mode_auto">Auto (off for incompatible apps)</string>
     <string name="voice_preview_mode_always">Always show</string>
@@ -350,4 +350,12 @@
     <string name="voice_model_qwen_audio_31_streaming">Qwen-Audio 3.1 Streaming</string>
     <string name="voice_model_qwen_audio_31_message">Qwen-Audio 3.1 Message</string>
     <string name="voice_model_qwen3_realtime">Qwen3-ASR Realtime</string>
+    <string name="voice_provider_siliconflow">SiliconFlow Free Service</string>
+    <string name="voice_sf_api_key">SiliconFlow API Key</string>
+    <string name="voice_sf_model">SiliconFlow ASR Model</string>
+    <string name="voice_sf_model_sensevoice">SenseVoiceSmall (Free)</string>
+    <string name="voice_sf_model_telespeech">TeleSpeechASR (Free)</string>
+    <string name="voice_error_sf_unavailable">SiliconFlow free service unavailable. Please configure an API key in Settings.</string>
+    <string name="voice_error_sf_http">SiliconFlow request failed (HTTP %1$d: %2$s)</string>
+    <string name="voice_error_sf_timeout">SiliconFlow upload timed out</string>
 </resources>

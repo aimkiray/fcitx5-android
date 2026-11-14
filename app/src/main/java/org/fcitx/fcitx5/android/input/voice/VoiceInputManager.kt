@@ -6,6 +6,7 @@ package org.fcitx.fcitx5.android.input.voice
 
 import android.os.Handler
 import android.os.Looper
+import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.input.FcitxInputMethodService
@@ -24,6 +25,7 @@ import kotlinx.coroutines.launch
  */
 object VoiceInputManager {
     const val BUILTIN_PROVIDER_ID = "builtin_dashscope"
+    const val BUILTIN_SF_PROVIDER_ID = "builtin_siliconflow"
 
     // ---- 状态机 ----
     private enum class State { IDLE, LISTENING, STOPPING }
@@ -33,7 +35,7 @@ object VoiceInputManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var capture: VoiceInputAudioCapture? = null
-    @Volatile private var engine: DashscopeStreamAsrEngine? = null
+    @Volatile private var engine: StreamingAsrEngine? = null
 
     /**
      * 会话代次：startSession 成功入口递增，回调构造时捕获。
@@ -78,7 +80,8 @@ object VoiceInputManager {
 
     // ---- 公开方法 ----
 
-    fun isBuiltinId(id: String): Boolean = id == BUILTIN_PROVIDER_ID
+    fun isBuiltinId(id: String): Boolean =
+        id == BUILTIN_PROVIDER_ID || id == BUILTIN_SF_PROVIDER_ID
 
     fun isActive(): Boolean = state != State.IDLE
 
@@ -99,12 +102,25 @@ object VoiceInputManager {
                     voiceOverlayHideCallback?.invoke()
                     return false
                 }
-                if (AppPrefs.getInstance().voice.voiceInputDashscopeApiKey
-                        .getValue().isBlank()
-                ) {
-                    voiceErrorCallback?.invoke(
-                        service.getString(R.string.voice_error_no_api_key)
-                    )
+                // API key 前置检查按 provider 分支：
+                // DashScope 仅需自有 key；SiliconFlow 自有 key 与内置
+                // BuildConfig key 双轨，均空才阻断（引擎 start() 内再兜底）
+                val prefs = AppPrefs.getInstance()
+                val providerId = prefs.keyboard.preferredVoiceInput.getValue()
+                val keyMissing = when (providerId) {
+                    BUILTIN_PROVIDER_ID ->
+                        prefs.voice.voiceInputDashscopeApiKey.getValue().isBlank()
+                    BUILTIN_SF_PROVIDER_ID ->
+                        prefs.voice.voiceInputSfApiKey.getValue().isBlank() &&
+                            BuildConfig.SF_FREE_API_KEY.isBlank()
+                    else -> false
+                }
+                if (keyMissing) {
+                    val msgRes = when (providerId) {
+                        BUILTIN_SF_PROVIDER_ID -> R.string.voice_error_sf_unavailable
+                        else -> R.string.voice_error_no_api_key
+                    }
+                    voiceErrorCallback?.invoke(service.getString(msgRes))
                     voiceOverlayHideCallback?.invoke()
                     return false
                 }
@@ -126,7 +142,9 @@ object VoiceInputManager {
     fun stop(service: FcitxInputMethodService, discardFinal: Boolean = false) {
         if (state == State.IDLE) return
         this.discardFinal = discardFinal
-        stopSession()
+        // discardFinal=true 即废弃会话：引擎走 cancel() 直接丢弃结果
+        // （SF 不再把整段音频上传第三方后再丢弃），而非 stop() 正常收尾
+        stopSession(cancel = discardFinal)
     }
 
     private fun startSession(service: FcitxInputMethodService) {
@@ -155,78 +173,52 @@ object VoiceInputManager {
         // gen 守卫与迟到回调口径一致，防快速 stop 后 show 落到新会话
         if (gen == sessionGen) voiceOverlayShowCallback?.invoke()
         val prefs = AppPrefs.getInstance()
-        val apiKey = prefs.voice.voiceInputDashscopeApiKey.getValue()
-        val model = prefs.voice.voiceInputDashscopeModel.getValue().modelId
-        val lang = prefs.voice.voiceInputDashscopeLanguage.getValue()
-        // 支持逗号分隔多语言（realtime 路径只用 firstOrNull，整串传入会出错）
-        val languages = lang.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        val providerId = prefs.keyboard.preferredVoiceInput.getValue()
 
-        // URL：固定使用中国大陆端点（阿里云官方 wss）
-        // 后续迭代可引入 region pref 扩展，v2 先硬编码
-        val wsRealtimeUrl = "wss://maas.qianwenaiapi.com/api-ws/v1/realtime"
-        val wsInferenceUrl = "wss://maas.qianwenaiapi.com/api-ws/v1/inference"
+        val engineInstance: StreamingAsrEngine = when (providerId) {
+            BUILTIN_PROVIDER_ID -> {
+                val apiKey = prefs.voice.voiceInputDashscopeApiKey.getValue()
+                val model = prefs.voice.voiceInputDashscopeModel.getValue().modelId
+                val lang = prefs.voice.voiceInputDashscopeLanguage.getValue()
+                // 支持逗号分隔多语言（realtime 路径只用 firstOrNull，整串传入会出错）
+                val languages =
+                    lang.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
-        val engineInstance = DashscopeStreamAsrEngine(
-            context = service,
-            scope = scope,
-            apiKey = apiKey,
-            model = model,
-            languages = languages,
-            keepDialect = false,
-            disfluencyRemoval = true,
-            prompt = "",
-            wsRealtimeUrl = wsRealtimeUrl,
-            wsInferenceUrl = wsInferenceUrl,
-            listener = object : StreamingAsrEngine.Listener {
-                override fun onPartial(text: String) {
-                    mainHandler.post {
-                        if (gen != sessionGen) return@post
-                        // 会话已结束/取消的迟到 partial 不上屏（幽灵 partial）
-                        if (state != State.LISTENING) return@post
-                        service.setVoiceComposingText(text)
-                    }
-                }
-                override fun onFinal(text: String) {
-                    // 旧会话引擎的迟到回调不得触碰新会话字段（误停新实例）
-                    if (gen != sessionGen) return
-                    // 先取引用置空再 post；capture.stop() 会 join 采集线程，
-                    // 挪到 IO 协程执行，避免阻塞主线程
-                    val c = capture
-                    capture = null
-                    engine = null
-                    scope.launch { c?.stop() }
-                    mainHandler.post {
-                        if (gen != sessionGen) return@post
-                        state = State.IDLE
-                        sessionReady = false
-                        if (discardFinal || text.isBlank()) {
-                            service.clearVoiceComposingText()
-                        } else {
-                            service.commitVoiceText(text)
-                        }
-                        voiceOverlayHideCallback?.invoke()
-                    }
-                }
-                override fun onError(message: String) {
-                    if (gen != sessionGen) return
-                    val c = capture
-                    capture = null
-                    engine = null
-                    scope.launch { c?.stop() }
-                    mainHandler.post {
-                        if (gen != sessionGen) return@post
-                        state = State.IDLE
-                        sessionReady = false
-                        service.clearVoiceComposingText()
-                        voiceErrorCallback?.invoke(message)
-                        voiceOverlayHideCallback?.invoke()
-                    }
-                }
-                override fun onStopped() {
-                    // 录音阶段结束，引擎等待 final；不需要更新 UI（已在 listening 状态）
-                }
+                // URL：固定使用中国大陆端点（阿里云官方 wss）
+                // 后续迭代可引入 region pref 扩展，v2 先硬编码
+                DashscopeStreamAsrEngine(
+                    context = service,
+                    scope = scope,
+                    apiKey = apiKey,
+                    model = model,
+                    languages = languages,
+                    keepDialect = false,
+                    disfluencyRemoval = true,
+                    prompt = "",
+                    wsRealtimeUrl = "wss://maas.qianwenaiapi.com/api-ws/v1/realtime",
+                    wsInferenceUrl = "wss://maas.qianwenaiapi.com/api-ws/v1/inference",
+                    listener = engineListener(service, gen)
+                )
             }
-        )
+            BUILTIN_SF_PROVIDER_ID -> {
+                val userKey = prefs.voice.voiceInputSfApiKey.getValue()
+                val model = prefs.voice.voiceInputSfModel.getValue().modelId
+                SiliconFlowFileAsrEngine(
+                    context = service,
+                    scope = scope,
+                    userApiKey = userKey,
+                    model = model,
+                    listener = engineListener(service, gen)
+                )
+            }
+            else -> {
+                // 不应进入（isBuiltinId 外路径不走 startSession），防御性处理
+                voiceErrorCallback?.invoke(service.getString(R.string.voice_error_failed))
+                voiceOverlayHideCallback?.invoke()
+                state = State.IDLE
+                return
+            }
+        }
         engine = engineInstance
 
         // PERF 修订：onLevel 节流缓存——采集线程每 ~100ms 调一次 onLevel，
@@ -264,12 +256,12 @@ object VoiceInputManager {
                     voiceOverlayHideCallback?.invoke()
                     service.clearVoiceComposingText()
                     // 异步死采集后字段不能残留（否则 stopSession 拿到野实例）；
-                    // capture 死后引擎必须收尾，防 WS 泄漏（engine.stop 内部
-                    // running/finalDelivered 已兜底单投递）
+                    // capture 死后引擎必须收尾：cancel 丢弃结果并释放资源
+                    // （防 WS 泄漏；SF 不再把已废弃音频上传第三方）
                     capture = null
                     val e = engine
                     engine = null
-                    scope.launch { e?.stop() }
+                    scope.launch { e?.cancel() }
                     state = State.IDLE
                     sessionReady = false
                 }
@@ -324,7 +316,65 @@ object VoiceInputManager {
         if (gen == sessionGen) voiceOverlayWaveCallback?.invoke()
     }
 
-    private fun stopSession() {
+    /**
+     * 引擎事件监听器（DashScope / SiliconFlow 两路径共用，逻辑与原内联匿名
+     * 对象完全一致）：gen 守卫丢弃迟到回调，service/UI 操作经 mainHandler
+     * 切回主线程。
+     */
+    private fun engineListener(
+        service: FcitxInputMethodService,
+        gen: Int
+    ): StreamingAsrEngine.Listener = object : StreamingAsrEngine.Listener {
+        override fun onPartial(text: String) {
+            mainHandler.post {
+                if (gen != sessionGen) return@post
+                // 会话已结束/取消的迟到 partial 不上屏（幽灵 partial）
+                if (state != State.LISTENING) return@post
+                service.setVoiceComposingText(text)
+            }
+        }
+        override fun onFinal(text: String) {
+            // 旧会话引擎的迟到回调不得触碰新会话字段（误停新实例）
+            if (gen != sessionGen) return
+            // 先取引用置空再 post；capture.stop() 会 join 采集线程，
+            // 挪到 IO 协程执行，避免阻塞主线程
+            val c = capture
+            capture = null
+            engine = null
+            scope.launch { c?.stop() }
+            mainHandler.post {
+                if (gen != sessionGen) return@post
+                state = State.IDLE
+                sessionReady = false
+                if (discardFinal || text.isBlank()) {
+                    service.clearVoiceComposingText()
+                } else {
+                    service.commitVoiceText(text)
+                }
+                voiceOverlayHideCallback?.invoke()
+            }
+        }
+        override fun onError(message: String) {
+            if (gen != sessionGen) return
+            val c = capture
+            capture = null
+            engine = null
+            scope.launch { c?.stop() }
+            mainHandler.post {
+                if (gen != sessionGen) return@post
+                state = State.IDLE
+                sessionReady = false
+                service.clearVoiceComposingText()
+                voiceErrorCallback?.invoke(message)
+                voiceOverlayHideCallback?.invoke()
+            }
+        }
+        override fun onStopped() {
+            // 录音阶段结束，引擎等待 final；不需要更新 UI（已在 listening 状态）
+        }
+    }
+
+    private fun stopSession(cancel: Boolean = false) {
         state = State.STOPPING
         // 会话进入终止流程即视为"未就绪"：isListening() 已不含 STOPPING，
         // 窗口重建不再补建覆盖层；此复位保证残留的 isSessionReady() 读到 false
@@ -341,9 +391,16 @@ object VoiceInputManager {
         engine = null
         scope.launch {
             c?.stop()
-            // engine.stop() 触发 recognizer.stop()/conversation.commit()，等 onFinal
-            e?.stop()
+            if (cancel) {
+                // 废弃会话：cancel() 丢弃结果、不上屏不上传
+                // （DashScope 默认实现即 stop()；SF 见引擎 cancel 注释）
+                e?.cancel()
+            } else {
+                // engine.stop() 触发 recognizer.stop()/conversation.commit()
+                // 或 SF 整段上传，等 onFinal/onError 收口
+                e?.stop()
+            }
         }
-        // onFinal/onError 回调会将 state 设回 IDLE
+        // onFinal/onError 回调会将 state 设回 IDLE（cancel 路径经空 final 收口）
     }
 }
