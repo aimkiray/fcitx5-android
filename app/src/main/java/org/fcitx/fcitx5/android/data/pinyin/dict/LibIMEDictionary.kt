@@ -14,7 +14,7 @@ class LibIMEDictionary(file: File) : PinyinDictionary() {
     override var file: File = file
         private set
 
-    var isEnabled: Boolean = true
+    override var isEnabled: Boolean = true
         private set
 
     override val type: Type = Type.LibIME
@@ -36,7 +36,7 @@ class LibIMEDictionary(file: File) : PinyinDictionary() {
         }
     }
 
-    fun enable() {
+    override fun enable() {
         if (isEnabled)
             return
         val newFile = file.resolveSibling(name + ".${type.ext}")
@@ -45,7 +45,7 @@ class LibIMEDictionary(file: File) : PinyinDictionary() {
         isEnabled = true
     }
 
-    fun disable() {
+    override fun disable() {
         if (!isEnabled)
             return
         val newFile = file.resolveSibling(name + ".${type.ext}.$DISABLE")

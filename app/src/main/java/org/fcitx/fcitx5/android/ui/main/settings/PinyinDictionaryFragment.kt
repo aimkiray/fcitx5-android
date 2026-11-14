@@ -60,7 +60,7 @@ class PinyinDictionaryFragment : Fragment(), OnItemChangedListener<PinyinDiction
             Mode.Custom(),
             PinyinDictManager.listDictionaries(),
             initCheckBox = { entry ->
-                if (entry is LibIMEDictionary) {
+                if (entry is LibIMEDictionary || entry is BuiltinDictionary) {
                     isChecked = entry.isEnabled
                     setOnCheckedChangeListener { _, isChecked ->
                         if (isChecked) entry.enable() else entry.disable()
@@ -208,8 +208,7 @@ class PinyinDictionaryFragment : Fragment(), OnItemChangedListener<PinyinDiction
     }
 
     private fun resetDustman() {
-        dustman.reset(ui.entries.mapNotNull { it as? LibIMEDictionary }
-            .associate { it.name to it.isEnabled })
+        dustman.reset(ui.entries.associate { it.name to it.isEnabled })
     }
 
     override fun onItemAdded(idx: Int, item: PinyinDictionary) {
@@ -228,7 +227,6 @@ class PinyinDictionaryFragment : Fragment(), OnItemChangedListener<PinyinDiction
     }
 
     override fun onItemUpdated(idx: Int, old: PinyinDictionary, new: PinyinDictionary) {
-        new as LibIMEDictionary
         dustman.addOrUpdate(new.name, new.isEnabled)
     }
 

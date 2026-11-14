@@ -32,14 +32,21 @@ object PinyinDictManager {
 
     fun listDictionaries(): List<PinyinDictionary> {
         val builtin = mutableListOf<PinyinDictionary>()
+        val builtinFileNames = mutableSetOf<String>()
         builtinPinyinDictDir.listFiles()?.forEach {
             if (it.extension == PinyinDictionary.Type.LibIME.ext) {
-                builtin.add(BuiltinDictionary(it))
+                builtinFileNames += it.name
+                builtin.add(BuiltinDictionary(it, pinyinDicDir))
             }
         }
         builtin.sortBy { it.name }
         val user = mutableListOf<PinyinDictionary>()
         pinyinDicDir.listFiles()?.forEach {
+            // a "<builtin>.dict.disable" in the user dir is the marker that
+            // disables a bundled dict; the builtin row already represents it
+            if (it.name.endsWith(".${LibIMEDictionary.DISABLE}") &&
+                it.name.dropLast(LibIMEDictionary.DISABLE.length + 1) in builtinFileNames
+            ) return@forEach
             PinyinDictionary.new(it)?.let { dict ->
                 if (dict is LibIMEDictionary) {
                     user.add(dict)

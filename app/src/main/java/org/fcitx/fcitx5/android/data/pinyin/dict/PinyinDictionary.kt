@@ -34,6 +34,13 @@ abstract class PinyinDictionary {
     open val name: String
         get() = file.nameWithoutExtension
 
+    open val isEnabled: Boolean
+        get() = true
+
+    open fun enable() {}
+
+    open fun disable() {}
+
     fun toTextDictionary(): TextDictionary {
         val dest = file.resolveSibling(name + ".${Type.Text.ext}")
         return toTextDictionary(dest)
