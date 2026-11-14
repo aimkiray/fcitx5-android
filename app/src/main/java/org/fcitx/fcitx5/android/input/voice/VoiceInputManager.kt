@@ -13,6 +13,7 @@ import org.fcitx.fcitx5.android.input.FcitxInputMethodService
 import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
@@ -38,6 +39,13 @@ object VoiceInputManager {
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var capture: VoiceInputAudioCapture? = null
     @Volatile private var engine: StreamingAsrEngine? = null
+
+    /**
+     * 上一会话 capture.stop() 的执行句柄（IO 协程内 join 采集线程 ≤300ms）。
+     * discard/回调路径同步置 IDLE 但旧 AudioRecord 释放是异步的；
+     * startSession 在新采集启动前检查并等待它，防录音双开（评审 C-M2）。
+     */
+    @Volatile private var captureStopJob: Job? = null
 
     /**
      * 已进入终止流程但尚未收口的引擎引用（评审 A-M2 修订）：
@@ -315,7 +323,11 @@ object VoiceInputManager {
             onError = { msg ->
                 mainHandler.post {
                     if (gen != sessionGen) return@post
-                    // 采集已死、会话终结：作废旧会话全部迟到回调，
+                    // 先收口状态（与 onFinal/onError 对齐）：采集已死、会话终结，
+                    // 回调内若同步触发新会话不会因残留 LISTENING 误判
+                    state = State.IDLE
+                    sessionReady = false
+                    // 作废旧会话全部迟到回调，
                     // 防服务端迟到 final 在错误 toast 后仍上屏、防二次 toast
                     sessionGen++
                     voiceErrorCallback?.invoke(msg)
@@ -325,18 +337,68 @@ object VoiceInputManager {
                     // capture 死后引擎必须收尾：cancel 丢弃结果并释放资源
                     // （防 WS 泄漏；SF 不再把已废弃音频上传第三方）。
                     // 若 stopSession 已把引用移交 stoppingEngine，同样须够到
+                    val c = capture
                     capture = null
                     val e = engine ?: stoppingEngine
                     engine = null
                     stoppingEngine = null
-                    scope.launch { e?.cancel() }
-                    state = State.IDLE
-                    sessionReady = false
+                    // c?.stop() 幂等：onError 路径采集多已自释放，但 worker
+                    // finally 可能仍在收尾，stop() 兜底 join（R3 句柄登记）
+                    captureStopJob = scope.launch {
+                        c?.stop()
+                        e?.cancel()
+                    }
                 }
             }
         )
         capture = captureInstance
 
+        // R3：discard/回调路径同步置 IDLE，但旧 capture.stop() 的 join（≤300ms）
+        // 仍在 IO 协程异步跑——此时直接 start 新 AudioRecord 可能双开失败。
+        // prev 在跑则把"引擎启动 + 采集启动 + 就绪标记"整体推迟到其收口后；
+        // prev 非 active（常见路径：上一会话早已停完或无上一会话）走原同步路径
+        val prev = captureStopJob
+        captureStopJob = null
+        if (prev?.isActive == true) {
+            // join 是挂起而非阻塞；resume 回主线程后按原顺序续跑
+            scope.launch(Dispatchers.Main) {
+                prev.join()
+                if (gen != sessionGen) return@launch
+                if (state != State.LISTENING) {
+                    // 延迟窗口内会话被终止（如 stopSession 非 cancel 路径已置
+                    // STOPPING）：未启动的引擎不会产生回调收口，此处代其收口，
+                    // 防 STOPPING 无出口悬挂 + 迟到的采集误启动
+                    capture = null
+                    engine = null
+                    stoppingEngine = null
+                    state = State.IDLE
+                    sessionReady = false
+                    return@launch
+                }
+                startEngineAndCapture(service, gen, engineInstance, captureInstance) {
+                    startErrorEmitted
+                }
+            }
+            return
+        }
+        startEngineAndCapture(service, gen, engineInstance, captureInstance) {
+            startErrorEmitted
+        }
+    }
+
+    /**
+     * startSession 尾部（抽取以便 R3 延迟分支复用，执行顺序与原内联一致）：
+     * 先启动引擎（建立 WS 连接 + 准备 prebuffer），再启动采集；
+     * 采集成功后才置 sessionReady 并通知 ready。两条回滚路径同原实现。
+     * 须在主线程语境调用（原路径同步执行、延迟路径 Dispatchers.Main）。
+     */
+    private fun startEngineAndCapture(
+        service: FcitxInputMethodService,
+        gen: Int,
+        engineInstance: StreamingAsrEngine,
+        captureInstance: VoiceInputAudioCapture,
+        startErrorEmitted: () -> Boolean
+    ) {
         // 先启动引擎（建立 WS 连接 + 准备 prebuffer），再启动采集；
         // 采集成功后才置 LISTENING 并通知 ready。
         // start() 除返回 isRunning=false 的同步校验失败外，还可能在
@@ -354,7 +416,7 @@ object VoiceInputManager {
             runCatching { engineInstance.stop() }
             // 引擎 start() 已同步 onError 过的失败不再补通用 toast（防双弹）；
             // 仅 onError 未触发的路径（异常先于回调挂接）补一条
-            if (gen == sessionGen && !startErrorEmitted) {
+            if (gen == sessionGen && !startErrorEmitted()) {
                 voiceErrorCallback?.invoke(service.getString(R.string.voice_error_failed))
             }
             // show 已触发：覆盖层随回滚收起（onError 的 post 也会 hide，幂等双保险）
@@ -412,7 +474,7 @@ object VoiceInputManager {
             capture = null
             engine = null
             stoppingEngine = null
-            scope.launch { c?.stop() }
+            captureStopJob = scope.launch { c?.stop() }
             mainHandler.post {
                 if (gen != sessionGen) return@post
                 state = State.IDLE
@@ -434,7 +496,7 @@ object VoiceInputManager {
             capture = null
             engine = null
             stoppingEngine = null
-            scope.launch { c?.stop() }
+            captureStopJob = scope.launch { c?.stop() }
             mainHandler.post {
                 if (gen != sessionGen) return@post
                 state = State.IDLE
@@ -479,7 +541,7 @@ object VoiceInputManager {
             // 收口，期间 discard 重入仍可经它 cancel 到在途上传
             stoppingEngine = e
         }
-        scope.launch {
+        captureStopJob = scope.launch {
             c?.stop()
             if (cancel) {
                 // 废弃会话：cancel() 丢弃结果、不上屏不上传

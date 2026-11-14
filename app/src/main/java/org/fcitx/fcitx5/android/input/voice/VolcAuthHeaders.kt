@@ -35,10 +35,18 @@ data class VolcAuthValues(
         if (useNewAuth) apiKey.isNotBlank()
         else appKey.isNotBlank() && accessKey.isNotBlank()
 
-    /** 凭证头列表（不含业务头）。 */
+    /**
+     * 凭证头列表（不含业务头）。
+     * 值经 [stripNonHeaderChars] 剥离非 ASCII 可见字符：非法头值会让
+     * okhttp Headers.Builder.add 抛 IllegalArgumentException，异常消息
+     * 内嵌原始凭证值，可能经 toast/logcat 泄漏——剥离后既防崩也防泄。
+     */
     fun credentialHeaders(): List<Pair<String, String>> =
-        if (useNewAuth) listOf("X-Api-Key" to apiKey)
-        else listOf("X-Api-App-Key" to appKey, "X-Api-Access-Key" to accessKey)
+        if (useNewAuth) listOf("X-Api-Key" to apiKey.stripNonHeaderChars())
+        else listOf(
+            "X-Api-App-Key" to appKey.stripNonHeaderChars(),
+            "X-Api-Access-Key" to accessKey.stripNonHeaderChars()
+        )
 
     /** 掩码三 key（防 data class 默认 toString 把凭证泄进日志）。 */
     override fun toString(): String =

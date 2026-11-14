@@ -94,6 +94,13 @@ class SiliconFlowFileAsrEngine(
     /** 在途 HTTP 调用；[cancel] 经此中断上传。 */
     @Volatile private var activeCall: Call? = null
 
+    /**
+     * cancel() 置位标记：stop() 上传协程在 `activeCall = call` 赋值前的
+     * 构建窗口（buildWav/tmp/multipart，~200ms）被 cancel 时 activeCall
+     * 仍为 null、无可中断；协程两处检查此标记兜底，防废弃会话音频外发。
+     */
+    @Volatile private var cancelRequested = false
+
     override val isRunning: Boolean get() = running.get()
 
     /**
@@ -112,6 +119,7 @@ class SiliconFlowFileAsrEngine(
             bufferedBytes = 0
         }
         durationCapped = false
+        cancelRequested = false
         running.set(true)
     }
 
@@ -171,6 +179,9 @@ class SiliconFlowFileAsrEngine(
                 bufferedBytes = 0
                 pcmData = buf
             }
+            // cancel 在本协程起跑前到达：早退省掉 buildWav/tmp/multipart
+            // 构建，更谈不上上传废弃会话音频
+            if (cancelRequested) return@launch
             if (durationCapped) {
                 durationCapped = false
                 // 时长上限截断：只记长度不落明文，已缓冲部分照常上传
@@ -203,12 +214,21 @@ class SiliconFlowFileAsrEngine(
 
                 val request = Request.Builder()
                     .url(SF_ENDPOINT)
-                    .addHeader("Authorization", "Bearer $key")
+                    // 剥离非 ASCII 可见字符：非法头值会让 okhttp 抛异常，
+                    // 其异常消息内嵌原始凭证值，可能经 toast/logcat 泄漏
+                    .addHeader("Authorization", "Bearer ${key.stripNonHeaderChars()}")
                     .post(multipart)
                     .build()
 
                 val call = HTTP_CLIENT.newCall(request)
                 activeCall = call
+                // cancel 在 newCall~赋值窗口读到 activeCall==null 时无法
+                // 中断本 call；此处补检并自行中断（finally 清 tmp）
+                if (cancelRequested) {
+                    activeCall = null
+                    call.cancel()
+                    return@launch
+                }
                 // execute() 是阻塞调用，协程取消无法直接中断它；
                 // 用独立 Deferred 承载并挂起 await，withTimeoutOrNull 的
                 // [UPLOAD_TIMEOUT_MS] 上限才真正生效。超时后 call.cancel()
@@ -276,6 +296,9 @@ class SiliconFlowFileAsrEngine(
      * 故仍投递空 final（blank → clearVoiceComposingText 分支）。
      */
     override fun cancel() {
+        // 先置位再中断：覆盖 activeCall 赋值前的构建窗口，协程内两处
+        // 检查点保证被取消会话的音频不外发
+        cancelRequested = true
         // 先中断可能在途的上传（stop() 已 CAS 置 false 时此分支仍可达）
         activeCall?.cancel()
         if (!running.compareAndSet(true, false)) return
@@ -339,3 +362,11 @@ class SiliconFlowFileAsrEngine(
 
 /** v1 默认免费模型（与 BiBi DEFAULT_SF_FREE_ASR_MODEL 保持一致）。 */
 internal const val DEFAULT_SF_FREE_MODEL = "FunAudioLLM/SenseVoiceSmall"
+
+/**
+ * 剥离 HTTP 头值中的非法字符（非 ASCII 可见字符 0x20-0x7E）。
+ * 凭证内混入控制字符/多字节字符时 okhttp Headers.Builder.add 抛
+ * IllegalArgumentException，异常消息内嵌原始值——剥离后既防崩也防泄。
+ */
+internal fun String.stripNonHeaderChars(): String =
+    replace(Regex("[^\\x20-\\x7E]"), "")

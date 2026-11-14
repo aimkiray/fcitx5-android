@@ -370,6 +370,7 @@
     <!-- SenseVoice error strings -->
     <string name="voice_error_sv_model_missing">Local model not ready, download it in settings first</string>
     <string name="voice_error_sv_integrity">Local model file corrupted: %1$s. Re-download in settings.</string>
+    <string name="voice_error_sv_timeout">Local recognition timed out</string>
 
     <!-- Volc prefs titles -->
     <string name="voice_volc_use_new_auth">Use new auth (X-Api-Key)</string>

@@ -24,6 +24,7 @@ import org.fcitx.fcitx5.android.utils.appContext
 import timber.log.Timber
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
@@ -71,6 +72,14 @@ object SenseVoiceModelManager {
      */
     @Volatile private var downloadGen = 0
 
+    /**
+     * sha256 结果内存缓存：key = (absolutePath, length, lastModified)。
+     * 每次会话 stop() 都跑 checkStatus（228MB 全量 sha256 ~2s），
+     * 文件未变时命中缓存直接复用；deleteModel / 下载落位时失效。
+     */
+    private val hashCache =
+        ConcurrentHashMap<Triple<String, Long, Long>, String>()
+
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -80,7 +89,10 @@ object SenseVoiceModelManager {
 
     /** 模型目录（需 Context，每次按需解析不缓存路径）。 */
     fun modelDir(context: Context): File {
-        val base = context.getExternalFilesDir(null) ?: context.filesDir
+        // 个别 ROM/存储状态下 getExternalFilesDir 会抛 RuntimeException
+        // （而非返回 null）：runCatching 兜底回退 filesDir，防设置页/引擎崩溃
+        val base = runCatching { context.getExternalFilesDir(null) }.getOrNull()
+            ?: context.filesDir
         return File(base, "${SenseVoiceModelSpec.SUBDIR}/${SenseVoiceModelSpec.VARIANT_DIR}")
     }
 
@@ -98,14 +110,25 @@ object SenseVoiceModelManager {
         val appCtx = context.applicationContext
         // 先取消在途下载：防"删除后被在途下载复活"（cancelDownload 内含 tmp 清理）
         cancelDownload()
-        val dir = modelDir(appCtx)
-        // 白名单删除：仅删模型文件与下载残留 .tmp；目录内用户自放文件不动
-        File(dir, SenseVoiceModelSpec.MODEL_FILE).delete()
-        File(dir, SenseVoiceModelSpec.TOKENS_FILE).delete()
-        cleanupTmpFiles(dir)
-        dir.delete()  // 目录为空才删除成功，天然幂等
-        SenseVoiceRecognizerManager.unload()
-        _downloadState.value = DownloadState.Idle
+        // 经 downloadMutex 串行化：被取消的旧 job 可能仍在锁内跑 verifyAndPlace
+        // 收尾，必须等它出锁后再删——否则"先删后 rename"把模型复活（E-L3）。
+        // verifyAndPlace 的 ensureActive 保证被取消的 job 不再做 rename
+        managerScope.launch {
+            downloadMutex.withLock {
+                val dir = modelDir(appCtx)
+                // 白名单删除：仅删模型文件与下载残留 .tmp；目录内用户自放文件不动
+                File(dir, SenseVoiceModelSpec.MODEL_FILE).delete()
+                File(dir, SenseVoiceModelSpec.TOKENS_FILE).delete()
+                cleanupTmpFiles(dir)
+                dir.delete()  // 目录为空才删除成功，天然幂等
+                hashCache.clear()
+                SenseVoiceRecognizerManager.unload()
+                // 竞态：新下载若已接管则不得回写 Idle 覆盖其 Downloading 状态
+                if (downloadJob?.isActive != true) {
+                    _downloadState.value = DownloadState.Idle
+                }
+            }
+        }
     }
 
     /** 探测并校验模型文件（同步，IO 线程调用）。 */
@@ -121,11 +144,11 @@ object SenseVoiceModelManager {
         if (tokensFile.length() != SenseVoiceModelSpec.tokens.sizeBytes) {
             return SvModelStatus.IntegrityError(SenseVoiceModelSpec.TOKENS_FILE)
         }
-        // SHA-256 完整校验
-        if (sha256Hex(tokensFile) != SenseVoiceModelSpec.tokens.sha256) {
+        // SHA-256 完整校验（经 hashCache：文件未变时跳过 ~2s 全量哈希）
+        if (sha256HexCached(tokensFile) != SenseVoiceModelSpec.tokens.sha256) {
             return SvModelStatus.IntegrityError(SenseVoiceModelSpec.TOKENS_FILE)
         }
-        if (sha256Hex(modelFile) != SenseVoiceModelSpec.model.sha256) {
+        if (sha256HexCached(modelFile) != SenseVoiceModelSpec.model.sha256) {
             return SvModelStatus.IntegrityError(SenseVoiceModelSpec.MODEL_FILE)
         }
         return SvModelStatus.Ready
@@ -194,6 +217,9 @@ object SenseVoiceModelManager {
         downloadJob?.cancel()
         downloadJob = null
         cleanupTmpFiles(modelDir(appContext))
+        // 竞态：新下载可能已在本函数执行间隙接管（downloadJob/activeCall 被
+        // 重新赋值、状态已写 Downloading），此时回写 Idle 会覆盖在途下载
+        if (downloadJob?.isActive == true || activeCall != null) return
         _downloadState.value = DownloadState.Idle
     }
 
@@ -215,6 +241,9 @@ object SenseVoiceModelManager {
     private suspend fun downloadAll(context: Context, useMirror: Boolean) {
         val dir = modelDir(context)
         dir.mkdirs()
+        // 上次进程死亡/强杀可能遗留 .tmp 半成品：先清再下，防陈旧残件
+        // 混入本轮校验落位（正常取消路径已清，此处兜进程级异常）
+        cleanupTmpFiles(dir)
         val url = SenseVoiceModelSpec.zipUrl(useMirror)
         val request = Request.Builder().url(url).get().build()
         val call = httpClient.newCall(request)
@@ -318,7 +347,11 @@ object SenseVoiceModelManager {
     }
 
     /** tmp 文件 sha256 校验 → rename 落位（失败删 tmp 抛异常）。 */
-    private fun verifyAndPlace(tmp: File, dest: File, spec: LocalModelFileSpec) {
+    private suspend fun verifyAndPlace(tmp: File, dest: File, spec: LocalModelFileSpec) {
+        // destTouched 标记 dest.delete() 已执行：catch 据此区分"rename/copyTo
+        // 半途产生的 dest 残件"与"落位前完好存在的旧文件"，仅前者允许删除——
+        // 否则 sha 不匹配/取消时会误删完好的旧模型
+        var destTouched = false
         try {
             if (tmp.length() != spec.sizeBytes) {
                 throw IllegalStateException("${spec.name} size mismatch: ${tmp.length()} != ${spec.sizeBytes}")
@@ -326,15 +359,34 @@ object SenseVoiceModelManager {
             if (sha256Hex(tmp) != spec.sha256) {
                 throw IllegalStateException("${spec.name} sha256 mismatch")
             }
+            // delete/rename 是不可逆点，各先确认未取消：收窄"dest 已删、
+            // tmp 已清"的两空窗口（与 deleteModel 的锁串行化配合防复活）
+            coroutineContext.ensureActive()
             dest.delete()
+            destTouched = true
+            coroutineContext.ensureActive()
             if (!tmp.renameTo(dest)) {
                 tmp.copyTo(dest, overwrite = true)
                 tmp.delete()
             }
+            // 落位完成：清掉该路径的旧 sha256 缓存条目
+            // （新文件元数据本就不命中，此为防陈旧条目堆积）
+            hashCache.keys.removeIf { it.first == dest.absolutePath }
         } catch (t: Throwable) {
             tmp.delete()
+            if (destTouched) dest.delete()
             throw t
         }
+    }
+
+    /**
+     * 带内存缓存的 sha256：key = (absolutePath, length, lastModified)，
+     * 文件未变时跳过全量读（每次会话省 ~2s）。getOrPut 非原子，
+     * 极端并发重复计算无害（结果一致，后写覆盖）。
+     */
+    private fun sha256HexCached(file: File): String {
+        val key = Triple(file.absolutePath, file.length(), file.lastModified())
+        return hashCache.getOrPut(key) { sha256Hex(file) }
     }
 
     private fun sha256Hex(file: File): String {

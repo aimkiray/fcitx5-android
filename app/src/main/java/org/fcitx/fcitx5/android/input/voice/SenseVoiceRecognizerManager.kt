@@ -85,6 +85,23 @@ object SenseVoiceRecognizerManager {
         }
     }
 
+    /**
+     * 预热识别器：提前触发 [ensurePrepared]（OfflineRecognizer 创建 ~1-2s
+     * JNI 加载），供 SenseVoiceFileAsrEngine.start() 在录音开始时调用，
+     * 省掉首次 decode 的加载等待。与 decodeOffline 经同一 [mutex] 天然
+     * 去重（已加载/加载中直接返回）；失败静默仅记日志——真正 decode 时
+     * 会重试并走正常错误回调。
+     */
+    fun warmUp(modelPath: String, tokensPath: String) {
+        scope.launch {
+            mutex.withLock {
+                runCatching {
+                    ensurePrepared(modelPath, tokensPath, null, null)
+                }.onFailure { Timber.w(it, "SenseVoice warmUp failed") }
+            }
+        }
+    }
+
     /** 卸载识别器（释放 JNI 资源）：供"清除模型"设置项调用。 */
     fun unload() {
         scope.launch {

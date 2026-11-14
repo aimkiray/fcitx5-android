@@ -84,6 +84,14 @@ class VolcFileAsrEngine(
     @Volatile private var durationCapped = false
     @Volatile private var activeCall: Call? = null
 
+    /**
+     * cancel() 置位标记：stop() 上传协程在 `activeCall = call` 赋值前的
+     * 构建窗口（buildWav/base64/JSON，大段音频可达 ~0.5-1s）被 cancel 时
+     * activeCall 仍为 null、无可中断；协程两处检查此标记兜底，
+     * 防废弃会话音频外发。
+     */
+    @Volatile private var cancelRequested = false
+
     override val isRunning: Boolean get() = running.get()
 
     /**
@@ -101,6 +109,7 @@ class VolcFileAsrEngine(
             bufferedBytes = 0
         }
         durationCapped = false
+        cancelRequested = false
         running.set(true)
     }
 
@@ -135,6 +144,9 @@ class VolcFileAsrEngine(
                 bufferedBytes = 0
                 pcmData = buf
             }
+            // cancel 在本协程起跑前到达：早退省掉 buildWav/base64/JSON
+            // 构建（最长 ~1s），更谈不上上传废弃会话音频
+            if (cancelRequested) return@launch
             if (durationCapped) {
                 durationCapped = false
                 Timber.d("Volc pcm capped, uploading ${pcmData.size} bytes")
@@ -159,6 +171,13 @@ class VolcFileAsrEngine(
 
                 val call = HTTP_CLIENT.newCall(request)
                 activeCall = call
+                // cancel 在 newCall~赋值窗口读到 activeCall==null 时无法
+                // 中断本 call；此处补检并自行中断（finally 清 activeCall）
+                if (cancelRequested) {
+                    activeCall = null
+                    call.cancel()
+                    return@launch
+                }
                 val respDeferred = async { call.execute() }
                 val resp = withTimeoutOrNull(UPLOAD_TIMEOUT_MS) { respDeferred.await() }
                 activeCall = null
@@ -207,6 +226,9 @@ class VolcFileAsrEngine(
      * 废弃会话：中断在途上传 + 清缓冲 + 投空 final（对齐 SF cancel 语义）。
      */
     override fun cancel() {
+        // 先置位再中断：覆盖 activeCall 赋值前的构建窗口，协程内两处
+        // 检查点保证被取消会话的音频不外发
+        cancelRequested = true
         activeCall?.cancel()
         if (!running.compareAndSet(true, false)) return
         synchronized(bufferLock) {

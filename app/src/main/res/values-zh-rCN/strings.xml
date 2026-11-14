@@ -370,6 +370,7 @@
     <!-- SenseVoice error strings -->
     <string name="voice_error_sv_model_missing">本地模型未就绪，请先在设置中下载</string>
     <string name="voice_error_sv_integrity">本地模型文件损坏：%1$s，请重新下载</string>
+    <string name="voice_error_sv_timeout">本地识别超时</string>
 
     <!-- Volc prefs titles -->
     <string name="voice_volc_use_new_auth">使用新版鉴权（X-Api-Key）</string>
