@@ -36,11 +36,19 @@ object UserDataManager {
         val exportTime: Long
     )
 
-    private fun writeFileTree(srcDir: File, destPrefix: String, dest: ZipOutputStream) {
+    private fun writeFileTree(
+        srcDir: File,
+        destPrefix: String,
+        dest: ZipOutputStream,
+        includeFile: (File) -> Boolean = { true }
+    ) {
         dest.putNextEntry(ZipEntry("$destPrefix/"))
         srcDir.walkTopDown().forEach { f ->
             val related = f.relativeTo(srcDir)
             if (related.path != "") {
+                if (f.isFile && !includeFile(f)) {
+                    return@forEach
+                }
                 if (f.isDirectory) {
                     dest.putNextEntry(ZipEntry("$destPrefix/${related.path}/"))
                 } else if (f.isFile) {
@@ -60,7 +68,12 @@ object UserDataManager {
     fun export(dest: OutputStream, timestamp: Long = System.currentTimeMillis()) = runCatching {
         ZipOutputStream(dest.buffered()).use { zipStream ->
             // shared_prefs
-            writeFileTree(sharedPrefsDir, "shared_prefs", zipStream)
+            writeFileTree(sharedPrefsDir, "shared_prefs", zipStream) { f ->
+                // voice_secrets.xml holds the DashScope API key: it must not
+                // leave the device via user data export (backup rules already
+                // exclude it from cloud/device-transfer backups)
+                f.name != "voice_secrets.xml"
+            }
             // databases
             writeFileTree(dataBasesDir, "databases", zipStream)
             // external

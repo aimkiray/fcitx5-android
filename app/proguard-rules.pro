@@ -27,6 +27,17 @@
 # debugging stack traces.
 -keepattributes SourceFile,LineNumberTable
 
+# Keep generic signatures & annotations (Gson/reflective deserialization in dashscope SDK)
+-keepattributes Signature,*Annotation*
+
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# DashScope SDK（反射/Gson 序列化需要保留类名与成员）
+-keep class com.alibaba.dashscope.** { *; }
+-dontwarn com.alibaba.dashscope.**
+
+# OkHttp & WebSocket（dashscope-sdk-java 传递依赖）
+-dontwarn okhttp3.**
+-dontwarn okio.**

@@ -202,6 +202,8 @@
     <string name="space_behavior_enumerate">Enumerate input methods</string>
     <string name="space_behavior_activate">Toggle input method activate state</string>
     <string name="space_behavior_picker">Show input method picker dialog</string>
+    <string name="space_behavior_voice_input">Voice Input (Toggle)</string>
+    <string name="space_behavior_voice_input_hold">Voice Input (Hold)</string>
     <string name="show_lang_switch_key">Show language switch key</string>
     <string name="horizontal_candidate_style">Horizontal candidate style</string>
     <string name="horizontal_candidate_never_fill">Never fill width</string>
@@ -321,4 +323,31 @@
     <string name="keyboard_height_percent_base">Keyboard height percent base</string>
     <string name="display_metrics">Display metrics (Resources.getDisplayMetrics)</string>
     <string name="real_size">Real size (Display.getRealSize)</string>
+    <string name="voice_error_no_permission">Microphone permission not granted</string>
+    <string name="voice_error_failed">Voice input failed</string>
+    <string name="voice_error_audio_minbuf">AudioRecord buffer too small: %1$d</string>
+    <string name="voice_error_audio_construct">Failed to create AudioRecord: %1$s</string>
+    <string name="voice_error_audio_not_init">AudioRecord not initialized</string>
+    <string name="voice_error_audio_start_failed">Failed to start recording: %1$s</string>
+    <string name="voice_error_audio_read">Failed to read audio: %1$d</string>
+    <string name="voice_dashscope_api_key">DashScope API Key</string>
+    <string name="voice_dashscope_model">Speech Recognition Model</string>
+    <string name="voice_dashscope_language">Recognition Language (empty=auto)</string>
+    <string name="voice_dashscope_language_hint">e.g. zh, en</string>
+    <string name="voice_mic_permission">Microphone permission</string>
+    <string name="voice_mic_permission_granted">Granted</string>
+    <string name="voice_mic_permission_denied">Not granted, tap to request</string>
+    <string name="voice_settings_hint">Set “Preferred voice input” to “Built-in (DashScope)” in keyboard settings first</string>
+    <string name="voice_preview_mode">Recognition preview in editor</string>
+    <string name="voice_preview_mode_auto">Auto (off for incompatible apps)</string>
+    <string name="voice_preview_mode_always">Always show</string>
+    <string name="voice_preview_mode_final_only">Final text only</string>
+    <string name="voice_provider_builtin">Built-in (DashScope)</string>
+    <string name="voice_error_no_api_key">DashScope API key is not set</string>
+    <string name="voice_input_settings">Voice Input</string>
+    <string name="voice_model_fun_asr_realtime">FunASR Realtime</string>
+    <string name="voice_model_qwen_audio_streaming">Qwen-Audio 3.0 Streaming (default)</string>
+    <string name="voice_model_qwen_audio_31_streaming">Qwen-Audio 3.1 Streaming</string>
+    <string name="voice_model_qwen_audio_31_message">Qwen-Audio 3.1 Message</string>
+    <string name="voice_model_qwen3_realtime">Qwen3-ASR Realtime</string>
 </resources>

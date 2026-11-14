@@ -8,6 +8,8 @@ package org.fcitx.fcitx5.android.input.keyboard
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import org.fcitx.fcitx5.android.core.CapabilityFlag
+import org.fcitx.fcitx5.android.core.CapabilityFlags
 import org.fcitx.fcitx5.android.core.FcitxAPI
 import org.fcitx.fcitx5.android.daemon.launchOnReady
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
@@ -32,8 +34,11 @@ import org.fcitx.fcitx5.android.input.keyboard.KeyAction.ShowInputMethodPickerAc
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.SpaceLongPressAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.SymAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.UnicodeAction
+import org.fcitx.fcitx5.android.input.keyboard.KeyAction.VoiceInputHoldEnd
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
+import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
 import org.fcitx.fcitx5.android.input.wm.InputWindowManager
+import org.fcitx.fcitx5.android.utils.InputMethodUtil
 import org.fcitx.fcitx5.android.utils.switchToNextIME
 import org.mechdancer.dependency.Dependent
 import org.mechdancer.dependency.UniqueComponent
@@ -61,8 +66,11 @@ class CommonKeyActionListener :
 
     private val spaceKeyLongPressBehavior by kbdPrefs.spaceKeyLongPressBehavior
     private val langSwitchKeyBehavior by kbdPrefs.langSwitchKeyBehavior
+    private val preferredVoiceInput by kbdPrefs.preferredVoiceInput
 
     private var backspaceSwipeState = Stopped
+
+    private var voiceHoldActive = false
 
     // there should be a new fcitx API for this
     private suspend fun FcitxAPI.commitAndReset() {
@@ -85,6 +93,21 @@ class CommonKeyActionListener :
                 service.showDialog(InputMethodPickerDialog.build(it, service, context))
             }
         }
+    }
+
+    private fun switchToVoiceInput(): Boolean {
+        val isPasswordField = service.currentInputEditorInfo?.let {
+            CapabilityFlags.fromEditorInfo(it).has(CapabilityFlag.Password)
+        } ?: false
+        if (isPasswordField) return false
+        if (VoiceInputManager.isBuiltinId(preferredVoiceInput)) {
+            // 内置引擎自持 voice*Callback（1 个 voiceErrorCallback +
+            // 4 个 voiceOverlay*Callback），不走参数注入
+            return VoiceInputManager.toggle(service)
+        }
+        val (id, subtype) = InputMethodUtil.findVoiceSubtype(preferredVoiceInput) ?: return false
+        InputMethodUtil.switchInputMethod(service, id, subtype)
+        return true
     }
 
     val listener by lazy {
@@ -152,13 +175,17 @@ class CommonKeyActionListener :
                     }
                 }
                 is DeleteSelectionAction -> {
-                    when (backspaceSwipeState) {
-                        Stopped -> {}
-                        Selection -> service.deleteSelection()
-                        Reset -> if (action.totalCnt < 0) { // swipe left
-                            service.postFcitxJob { reset() }
+                    if (!action.cancelled) {
+                        when (backspaceSwipeState) {
+                            Stopped -> {}
+                            Selection -> service.deleteSelection()
+                            Reset -> if (action.totalCnt < 0) { // swipe left
+                                service.postFcitxJob { reset() }
+                            }
                         }
                     }
+                    // a cancelled Up only resets the swipe state: no deletion,
+                    // and backspaceSwipeState must not stay stuck for next swipe
                     backspaceSwipeState = Stopped
                 }
                 is PickerSwitchAction -> {
@@ -180,6 +207,27 @@ class CommonKeyActionListener :
                             toggleIme()
                         }
                         SpaceLongPressBehavior.ShowPicker -> showInputMethodPicker()
+                        SpaceLongPressBehavior.VoiceInput -> { switchToVoiceInput() }
+                        SpaceLongPressBehavior.VoiceInputHold -> {
+                            val started = switchToVoiceInput()
+                            if (VoiceInputManager.isBuiltinId(preferredVoiceInput)) {
+                                voiceHoldActive = started
+                            }
+                        }
+                    }
+                }
+                is VoiceInputHoldEnd -> {
+                    if (voiceHoldActive) {
+                        // 仅会话仍活着才 toggle=stop；按住期间会话异常结束或 start 失败时
+                        // voiceHoldActive 可能残留 true，直接 toggle() 会误起新会话。
+                        // 停止不经过 switchToVoiceInput() 的密码字段门卫——门卫只应
+                        // 拦截会话开始，不应拦截会话停止
+                        if (VoiceInputManager.isActive() &&
+                            VoiceInputManager.isBuiltinId(preferredVoiceInput)
+                        ) {
+                            VoiceInputManager.toggle(service)
+                        }
+                        voiceHoldActive = false
                     }
                 }
                 else -> {}

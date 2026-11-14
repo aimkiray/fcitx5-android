@@ -114,6 +114,14 @@ dependencies {
     implementation(libs.flexbox)
     implementation(libs.dependency)
     implementation(libs.timber)
+    // 内置 DashScope 语音识别引擎（slf4j-simple 会抢绑定，排除之）
+    implementation("com.alibaba:dashscope-sdk-java:2.23.1") {
+        exclude(group = "org.slf4j", module = "slf4j-simple")
+    }
+    // dashscope-sdk-java 传递依赖 okhttp4；用 BOM 把 okhttp 全家对齐到 5.3.2
+    //（5.5.0 的 okhttp-android 要求 compileSdk>=37，本项目仍为 36）
+    implementation(platform("com.squareup.okhttp3:okhttp-bom:5.3.2"))
+    implementation("com.squareup.okhttp3:okhttp")
     implementation(libs.splitties.bitflags)
     implementation(libs.splitties.dimensions)
     implementation(libs.splitties.resources)

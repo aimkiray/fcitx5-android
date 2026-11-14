@@ -55,16 +55,19 @@ import org.fcitx.fcitx5.android.core.KeyStates
 import org.fcitx.fcitx5.android.core.KeySym
 import org.fcitx.fcitx5.android.core.ScancodeMapping
 import org.fcitx.fcitx5.android.core.SubtypeManager
+import org.fcitx.fcitx5.android.core.TextFormatFlag
 import org.fcitx.fcitx5.android.daemon.FcitxConnection
 import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.fcitx.fcitx5.android.data.InputFeedbacks
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreference
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceProvider
+import org.fcitx.fcitx5.android.data.prefs.VoicePreviewMode
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.cursor.CursorRange
 import org.fcitx.fcitx5.android.input.cursor.CursorTracker
+import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
 import org.fcitx.fcitx5.android.utils.InputMethodUtil
 import org.fcitx.fcitx5.android.utils.alpha
 import org.fcitx.fcitx5.android.utils.forceShowSelf
@@ -127,6 +130,12 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     private val composing = CursorRange()
     private var composingText = FormattedText.Empty
+
+    /**
+     * Whether current composing text is owned by voice input (a preview span that
+     * must not be baked into the editor by finishComposingText).
+     */
+    private var voiceComposingActive = false
 
     private fun resetComposingState() {
         composing.clear()
@@ -453,6 +462,64 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         }
     }
 
+    fun setVoiceComposingText(text: String) {
+        val ic = currentInputConnection ?: return
+        if (text.isBlank()) return
+        // 远程桌面等 TYPE_NULL 类编辑器没有真正的 composing 区域概念，会把
+        // setComposingText 当 commitText 原样转发到远端——partial 与 final
+        // 各进一遍产生双重输入。Auto 模式下对此类编辑器跳过预览（内部
+        // composing 状态与 IC 都不更新），commitVoiceText 因 composing 为空
+        // 自然走纯 commitText 路径只上屏终稿
+        if (shouldSkipVoiceComposing()) return
+        val start = if (composing.isEmpty()) selection.latest.start else composing.start
+        val formatted = FormattedText(
+            arrayOf(text),
+            intArrayOf(TextFormatFlag.Underline.flag),
+            text.length,
+        )
+        composing.update(start, start + text.length)
+        composingText = formatted
+        voiceComposingActive = true
+        selection.predict(composing.end)
+        ic.setComposingText(formatted.toSpannedString(highlightColor), 1)
+    }
+
+    private fun shouldSkipVoiceComposing(): Boolean =
+        when (prefs.voice.voiceInputPreviewMode.getValue()) {
+            VoicePreviewMode.FinalOnly -> true
+            VoicePreviewMode.Always -> false
+            VoicePreviewMode.Auto ->
+                currentInputEditorInfo?.inputType?.and(InputType.TYPE_MASK_CLASS) ==
+                        InputType.TYPE_NULL
+        }
+
+    fun clearVoiceComposingText() {
+        voiceComposingActive = false
+        val ic = currentInputConnection ?: return
+        if (composing.isEmpty()) return
+        resetComposingState()
+        ic.setComposingText("", 1)
+    }
+
+    fun commitVoiceText(text: String) {
+        // blank 终稿也要先清残留 preview——否则 voiceComposingActive 已丢的
+        // composing span 会成为无主文本，被后续 handleCursorUpdate 烤进编辑器
+        if (text.isBlank()) {
+            clearVoiceComposingText()
+            return
+        }
+        voiceComposingActive = false
+        val ic = currentInputConnection ?: return
+        if (composing.isNotEmpty() && composingText.toString() == text) {
+            selection.predict(composing.start + text.length)
+            resetComposingState()
+            ic.finishComposingText()
+        } else {
+            clearVoiceComposingText()
+            commitText(text)
+        }
+    }
+
     private fun sendDownKeyEvent(eventTime: Long, keyEventCode: Int, metaState: Int = 0) {
         currentInputConnection?.sendKeyEvent(
             KeyEvent(
@@ -725,6 +792,13 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        if (VoiceInputManager.isActive() || voiceComposingActive) {
+            // the voice preview belongs to the previous editor: drop it and stop
+            // the session discarding its final, so a late transcript can't leak
+            // into the new input field
+            clearVoiceComposingText()
+            VoiceInputManager.stop(this, discardFinal = true)
+        }
         // update selection as soon as possible
         // sometimes when restarting input, onUpdateSelection happens before onStartInput, and
         // initialSel{Start,End} is outdated. but it's the client app's responsibility to send
@@ -889,6 +963,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         // check if cursor inside composing text
         if (composing.contains(newSelStart)) {
             if (ignoreSystemCursor) return
+            // voice composing is a preview span without a matching fcitx preedit:
+            // moving the fcitx cursor would act on stale engine-side state
+            if (voiceComposingActive) return
             // fcitx cursor position is relative to client preedit (composing text)
             val position = newSelStart - composing.start
             // move fcitx cursor when cursor position changed
@@ -903,9 +980,16 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             }
         } else {
             Timber.d("handleCursorUpdate: focus out/in")
-            resetComposingState()
-            // cursor outside composing range, finish composing as-is
-            currentInputConnection?.finishComposingText()
+            if (voiceComposingActive) {
+                // voice composing is a preview span owned by voice input:
+                // drop it instead of baking it into the editor, or the final
+                // transcript committed later would duplicate the partial text
+                clearVoiceComposingText()
+            } else {
+                resetComposingState()
+                // cursor outside composing range, finish composing as-is
+                currentInputConnection?.finishComposingText()
+            }
             // `fcitx.reset()` here would commit preedit after new cursor position
             // since we have `ClientUnfocusCommit`, focus out and in would do the trick
             postFcitxJob {
@@ -952,6 +1036,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             } else {
                 val start = if (composing.isEmpty()) lastSelection.start else composing.start
                 composing.update(start, start + text.length)
+                // fcitx wrote a real preedit: the composing is no longer voice-owned
+                voiceComposingActive = false
                 // skip cursor reposition when:
                 // - preedit cursor is at the end
                 // - cursor position is invalid
@@ -1052,8 +1138,17 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         decorLocationUpdated = false
         inputDeviceMgr.onFinishInputView()
         currentInputConnection?.apply {
+            if (VoiceInputManager.isActive() || voiceComposingActive) {
+                // remove the voice preview span first, so it won't be baked into
+                // the editor by finishComposingText and committed twice
+                clearVoiceComposingText()
+            }
             finishComposingText()
             monitorCursorAnchor(false)
+        }
+        if (VoiceInputManager.isActive()) {
+            // discard the pending final: it must not land in the next input field
+            VoiceInputManager.stop(this, discardFinal = true)
         }
         resetComposingState()
         postFcitxJob {
@@ -1084,6 +1179,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onDestroy() {
+        if (VoiceInputManager.isActive()) {
+            VoiceInputManager.stop(this, discardFinal = true)
+        }
         recreateInputViewPrefs.forEach {
             it.unregisterOnChangeListener(recreateInputViewListener)
         }

@@ -1,0 +1,16 @@
+{
+    "uniqueId": "Jay-Goo/WaveLineView",
+    "artifactVersion": "1.0.4",
+    "description": "A memory efficient wave line view for Android.",
+    "name": "Jay-Goo/WaveLineView",
+    "website": "https://github.com/Jay-Goo/WaveLineView",
+    "developers": [
+        {
+            "name": "JayGoo"
+        }
+    ],
+    "tag": "vendored",
+    "licenses": [
+        "Apache-2.0"
+    ]
+}

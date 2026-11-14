@@ -34,7 +34,14 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
         val countX: Int,
         val countY: Int,
         val totalX: Int,
-        val totalY: Int
+        val totalY: Int,
+        /**
+         * Whether this event originates from a cancellation (ACTION_CANCEL or
+         * programmatic [cancelGestures]) rather than a real touch release.
+         * Commit-type Up consumers must check this flag and bail out early;
+         * cleanup-type consumers should keep running as usual.
+         */
+        val cancelled: Boolean = false
     )
 
     fun interface OnGestureListener {
@@ -78,6 +85,7 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
     private var swipeTotalX = 0
     private var swipeTotalY = 0
     private var gestureConsumed = false
+    private var gestureActive = false
 
     var doubleTapEnabled = false
     private var lastClickTime = 0L
@@ -133,11 +141,20 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
             swipeTotalY = 0
             gestureConsumed = false
         }
+        swipeLastX = -1f
+        swipeLastY = -1f
         // double tap state should be preserved on touch up
     }
 
-    fun cancelGestures() {
+    fun cancelGestures(x: Float = swipeLastX, y: Float = swipeLastY) {
         isPressed = false
+        if (gestureActive) {
+            gestureActive = false
+            // programmatic cancel gets the same Up dispatch as a real ACTION_CANCEL
+            // (marked `cancelled`), so listeners (eg. hold-to-talk VoiceInputHoldEnd)
+            // can release resources without committing pending actions
+            dispatchGestureEvent(GestureType.Up, x, y, cancelled = true)
+        }
         resetState()
         // reset double tap state on cancel
         if (doubleTapEnabled) {
@@ -157,6 +174,7 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
                 isPressed = true
                 InputFeedbacks.hapticFeedback(this)
                 InputFeedbacks.soundEffect(soundEffect)
+                gestureActive = true
                 dispatchGestureEvent(GestureType.Down, x, y)
                 if (longPressEnabled) {
                     longPressJob?.cancel()
@@ -182,13 +200,14 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
                         }
                     }
                 }
-                if (swipeEnabled) {
-                    swipeLastX = x
-                    swipeLastY = y
-                }
+                // seed last touch position so a later programmatic cancelGestures()
+                // dispatches its Up with real coordinates instead of (-1, -1)
+                swipeLastX = x
+                swipeLastY = y
             }
             MotionEvent.ACTION_UP -> {
                 isPressed = false
+                gestureActive = false
                 InputFeedbacks.hapticFeedback(this, longPress = true, keyUp = true)
                 dispatchGestureEvent(GestureType.Up, event.x, event.y)
                 val shouldPerformClick = !(touchMovedOutside ||
@@ -240,8 +259,8 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
-                dispatchGestureEvent(GestureType.Up, event.x, event.y)
-                cancelGestures()
+                // cancelGestures dispatches GestureType.Up itself
+                cancelGestures(x, y)
                 return true
             }
         }
@@ -253,9 +272,11 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
         x: Float,
         y: Float,
         countX: Int = 0,
-        countY: Int = 0
+        countY: Int = 0,
+        cancelled: Boolean = false
     ) {
-        val event = Event(type, gestureConsumed, x, y, countX, countY, swipeTotalX, swipeTotalY)
+        val event =
+            Event(type, gestureConsumed, x, y, countX, countY, swipeTotalX, swipeTotalY, cancelled)
         val consumed = onGestureListener?.onGesture(this, event) ?: return
         if (consumed && !gestureConsumed) {
             gestureConsumed = true

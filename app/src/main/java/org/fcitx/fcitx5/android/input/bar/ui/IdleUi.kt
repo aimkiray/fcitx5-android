@@ -39,7 +39,6 @@ import splitties.views.dsl.core.add
 import splitties.views.dsl.core.lParams
 import splitties.views.dsl.core.frameLayout
 import splitties.views.dsl.core.matchParent
-import splitties.views.imageResource
 import timber.log.Timber
 
 class IdleUi(

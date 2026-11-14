@@ -202,6 +202,8 @@
     <string name="space_behavior_enumerate">轮换输入法</string>
     <string name="space_behavior_activate">在当前输入法和第一个输入法之间切换</string>
     <string name="space_behavior_picker">显示输入法选择对话框</string>
+    <string name="space_behavior_voice_input">语音输入（切换）</string>
+    <string name="space_behavior_voice_input_hold">语音输入（按住）</string>
     <string name="show_lang_switch_key">显示语言切换键</string>
     <string name="horizontal_candidate_style">横向候选词样式</string>
     <string name="horizontal_candidate_never_fill">从不填充宽度</string>
@@ -321,4 +323,31 @@
     <string name="keyboard_height_percent_base">键盘高度百分比</string>
     <string name="display_metrics">显示指标 (Resources.getDisplayMetrics)</string>
     <string name="real_size">真实尺寸 (Display.getRealSize)</string>
+    <string name="voice_error_no_permission">未授予麦克风权限</string>
+    <string name="voice_error_failed">语音输入失败</string>
+    <string name="voice_error_audio_minbuf">录音缓冲区不足：%1$d</string>
+    <string name="voice_error_audio_construct">录音初始化失败：%1$s</string>
+    <string name="voice_error_audio_not_init">录音设备未初始化</string>
+    <string name="voice_error_audio_start_failed">无法开始录音：%1$s</string>
+    <string name="voice_error_audio_read">读取录音失败：%1$d</string>
+    <string name="voice_dashscope_api_key">DashScope API 密钥</string>
+    <string name="voice_dashscope_model">语音识别模型</string>
+    <string name="voice_dashscope_language">识别语言（空=自动）</string>
+    <string name="voice_dashscope_language_hint">如 zh、en</string>
+    <string name="voice_mic_permission">麦克风权限</string>
+    <string name="voice_mic_permission_granted">已授予</string>
+    <string name="voice_mic_permission_denied">未授予，点击申请</string>
+    <string name="voice_settings_hint">需先在键盘设置中将“首选语音输入”选为“内置（DashScope）”</string>
+    <string name="voice_preview_mode">识别文字实时预览</string>
+    <string name="voice_preview_mode_auto">自动（不兼容应用不预览）</string>
+    <string name="voice_preview_mode_always">总是预览</string>
+    <string name="voice_preview_mode_final_only">仅最终文本</string>
+    <string name="voice_provider_builtin">内置（DashScope）</string>
+    <string name="voice_error_no_api_key">未设置 DashScope API 密钥</string>
+    <string name="voice_input_settings">语音输入</string>
+    <string name="voice_model_fun_asr_realtime">FunASR 实时</string>
+    <string name="voice_model_qwen_audio_streaming">Qwen-Audio 3.0 流式（默认）</string>
+    <string name="voice_model_qwen_audio_31_streaming">Qwen-Audio 3.1 流式</string>
+    <string name="voice_model_qwen_audio_31_message">Qwen-Audio 3.1 消息</string>
+    <string name="voice_model_qwen3_realtime">Qwen3-ASR 实时</string>
 </resources>

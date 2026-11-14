@@ -228,8 +228,15 @@ class PickerPageUi(
                                 onPopupChangeFocus(view.id, event.x, event.y)
                             }
                             CustomGestureView.GestureType.Up -> {
-                                onPopupTrigger(view.id).also {
+                                // a cancelled Up must not commit the focused
+                                // popup entry; only dismiss it
+                                if (event.cancelled) {
                                     onPopupAction(PopupAction.DismissAction(view.id))
+                                    false
+                                } else {
+                                    onPopupTrigger(view.id).also {
+                                        onPopupAction(PopupAction.DismissAction(view.id))
+                                    }
                                 }
                             }
                         }

@@ -64,6 +64,7 @@ import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.popup.PopupComponent
 import org.fcitx.fcitx5.android.input.status.StatusAreaWindow
+import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
 import org.fcitx.fcitx5.android.input.wm.InputWindow
 import org.fcitx.fcitx5.android.input.wm.InputWindowManager
 import org.fcitx.fcitx5.android.utils.AppUtil
@@ -198,7 +199,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     }
 
     private val swipeDownExpandCallback = CustomGestureView.OnGestureListener { _, e ->
-        if (e.type == CustomGestureView.GestureType.Up && e.totalY > 0) {
+        if (e.type == CustomGestureView.GestureType.Up && !e.cancelled && e.totalY > 0) {
             service.requestHideSelf(0)
             true
         } else false
@@ -228,6 +229,10 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
                     v.iconRotation = angle
                 }
                 CustomGestureView.GestureType.Up -> {
+                    v.iconRotation = 0f
+                    // a cancelled Up must not hide the keyboard nor toggle
+                    // the number row; only the rotation cleanup above applies
+                    if (e.cancelled) return@OnGestureListener false
                     val handled = when (angle) {
                         in -45f..45f if distance > v.swipeThresholdX -> {
                             service.requestHideSelf(0)
@@ -241,14 +246,15 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
                         }
                         else -> false
                     }
-                    v.iconRotation = 0f
                     return@OnGestureListener handled
                 }
                 else -> {}
             }
         }
 
-        if (e.type == CustomGestureView.GestureType.Up && abs(e.totalY) > abs(e.totalX) && e.totalY > 0) {
+        if (e.type == CustomGestureView.GestureType.Up && !e.cancelled &&
+            abs(e.totalY) > abs(e.totalX) && e.totalY > 0
+        ) {
             service.requestHideSelf(0)
             true
         } else false
@@ -257,6 +263,12 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     private var voiceInputSubtype: Pair<String, InputMethodSubtype>? = null
 
     private val switchToVoiceInputCallback = View.OnClickListener {
+        // the built-in provider toggles an in-place voice session;
+        // otherwise fall back to switching to a system voice input method
+        if (VoiceInputManager.isBuiltinId(preferredVoiceInput)) {
+            VoiceInputManager.toggle(service)
+            return@OnClickListener
+        }
         val (id, subtype) = voiceInputSubtype ?: return@OnClickListener
         InputMethodUtil.switchInputMethod(service, id, subtype)
     }
@@ -429,6 +441,31 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         ClipboardManager.addOnUpdateListener(onClipboardUpdateListener)
         clipboardSuggestion.registerOnChangeListener(onClipboardSuggestionUpdateListener)
         clipboardItemTimeout.registerOnChangeListener(onClipboardTimeoutUpdateListener)
+        // Voice status text is superseded by the full-keyboard waveform overlay
+        // (KeyboardWindow registers the overlay callbacks); only errors surface
+        // here as a Toast, shared by the mic button and space-key long-press.
+        val voiceErrorCb: (String) -> Unit = { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+        VoiceInputManager.voiceErrorCallback = voiceErrorCb
+        // The callback lives on a process-level object and captures this bar's
+        // context; drop it when the bar view detaches (theme switch / input
+        // view rebuild) so a stale component never receives voice events.
+        // `===` guards only clear the callback this component registered.
+        // The listener must stay installed across detach/attach cycles:
+        // when the same view re-attaches and nothing re-registered the
+        // callback meanwhile, restore it (`== null` keeps `===` semantics —
+        // a newer component's callback is never clobbered).
+        view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                if (VoiceInputManager.voiceErrorCallback == null)
+                    VoiceInputManager.voiceErrorCallback = voiceErrorCb
+            }
+            override fun onViewDetachedFromWindow(v: View) {
+                if (VoiceInputManager.voiceErrorCallback === voiceErrorCb)
+                    VoiceInputManager.voiceErrorCallback = null
+            }
+        })
     }
 
     override fun onStartInput(info: EditorInfo, capFlags: CapabilityFlags) {
@@ -442,8 +479,10 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             idleUi.inlineSuggestionsBar.clear()
         }
         voiceInputSubtype = InputMethodUtil.findVoiceSubtype(preferredVoiceInput)
+        val hasBuiltinProvider = VoiceInputManager.isBuiltinId(preferredVoiceInput)
         val shouldShowVoiceInput =
-            showVoiceInputButton && voiceInputSubtype != null && !capFlags.has(CapabilityFlag.Password)
+            showVoiceInputButton && (voiceInputSubtype != null || hasBuiltinProvider) &&
+                !capFlags.has(CapabilityFlag.Password)
         idleUi.setHideKeyboardIsVoiceInput(
             shouldShowVoiceInput,
             if (shouldShowVoiceInput) switchToVoiceInputCallback else hideKeyboardCallback

@@ -35,9 +35,16 @@ sealed class KeyAction {
 
     data class MoveSelectionAction(val start: Int = 0, val end: Int = 0) : KeyAction()
 
-    data class DeleteSelectionAction(val totalCnt: Int = 0) : KeyAction()
+    /**
+     * @param cancelled the gesture was cancelled: only reset swipe-selection
+     * state in [CommonKeyActionListener], do not delete anything.
+     */
+    data class DeleteSelectionAction(val totalCnt: Int = 0, val cancelled: Boolean = false) :
+        KeyAction()
 
     data class PickerSwitchAction(val key: PickerWindow.Key? = null) : KeyAction()
 
     data object SpaceLongPressAction : KeyAction()
+
+    data object VoiceInputHoldEnd : KeyAction()
 }

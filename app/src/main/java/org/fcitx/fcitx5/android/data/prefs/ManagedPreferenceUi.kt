@@ -5,11 +5,15 @@
 package org.fcitx.fcitx5.android.data.prefs
 
 import android.content.Context
+import android.os.Build
+import android.view.View
 import androidx.annotation.StringRes
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
+import androidx.preference.PreferenceDataStore
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
 import org.fcitx.fcitx5.android.ui.main.modified.MySwitchPreference
 import org.fcitx.fcitx5.android.ui.main.settings.DialogSeekBarPreference
 import org.fcitx.fcitx5.android.ui.main.settings.EditTextIntPreference
@@ -86,10 +90,19 @@ abstract class ManagedPreferenceUi<T : Preference>(
             setTitle(this@VoiceInputList.title)
             setDialogTitle(this@VoiceInputList.title)
             val voiceInputMethods = InputMethodUtil.listVoiceInputMethods()
-            entryValues = arrayOf("", *voiceInputMethods.map { it.first.id }.toTypedArray())
+            // system voice input methods + the built-in DashScope engine
+            val systemIds = voiceInputMethods.map { it.first.id }
+            val systemLabels =
+                voiceInputMethods.map { it.first.loadLabel(context.packageManager) }
+            entryValues = arrayOf(
+                "",
+                *systemIds.toTypedArray(),
+                VoiceInputManager.BUILTIN_PROVIDER_ID
+            )
             entries = arrayOf(
                 context.getString(R.string.system_default),
-                *voiceInputMethods.map { it.first.loadLabel(context.packageManager) }.toTypedArray()
+                *systemLabels.toTypedArray(),
+                context.getString(R.string.voice_provider_builtin)
             )
             // shows "(Not Available)" if selected id is not present
             summaryProvider = Preference.SummaryProvider<ListPreference> { preference ->
@@ -97,6 +110,67 @@ abstract class ManagedPreferenceUi<T : Preference>(
                     preference.entry
                 } else {
                     context.getString(R.string._not_available_)
+                }
+            }
+        }
+    }
+
+    class EditTextPassword(
+        @StringRes
+        val title: Int,
+        key: String,
+        val defaultValue: String,
+        @StringRes
+        val summary: Int? = null,
+        val dataStore: PreferenceDataStore? = null,
+        enableUiOn: (() -> Boolean)? = null
+    ) : ManagedPreferenceUi<EditTextPreference>(key, enableUiOn) {
+        override fun createUi(context: Context) = EditTextPreference(context).apply {
+            key = this@EditTextPassword.key
+            isIconSpaceReserved = false
+            isSingleLineTitle = false
+            setDefaultValue(defaultValue)
+            setTitle(this@EditTextPassword.title)
+            setDialogTitle(this@EditTextPassword.title)
+            // 非空时把读写路由到自定义存储（如独立 SP 文件），绕过默认 SP 与云备份
+            this@EditTextPassword.dataStore?.let { preferenceDataStore = it }
+            summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
+                if (pref.text.isNullOrBlank()) context.getString(R.string._not_available_)
+                // 掩码显示，不显示真实密钥（规格 §5.5：summaryProvider 不得输出明文）；
+                // 固定 8 个掩码符，不随密钥长度变化，避免泄露长度信息
+                else "●".repeat(8)
+            }
+            setOnBindEditTextListener { editText ->
+                editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                // 密钥字段禁止 autofill 框架存取（API 26+）
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    editText.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+                }
+            }
+        }
+    }
+
+    class EditTextString(
+        @StringRes
+        val title: Int,
+        key: String,
+        val defaultValue: String,
+        @StringRes
+        val hint: Int? = null,
+        enableUiOn: (() -> Boolean)? = null
+    ) : ManagedPreferenceUi<EditTextPreference>(key, enableUiOn) {
+        override fun createUi(context: Context) = EditTextPreference(context).apply {
+            key = this@EditTextString.key
+            isIconSpaceReserved = false
+            isSingleLineTitle = false
+            setDefaultValue(defaultValue)
+            setTitle(this@EditTextString.title)
+            setDialogTitle(this@EditTextString.title)
+            summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
+            this@EditTextString.hint?.let { hintRes ->
+                setOnBindEditTextListener { editText ->
+                    editText.hint = context.getString(hintRes)
                 }
             }
         }

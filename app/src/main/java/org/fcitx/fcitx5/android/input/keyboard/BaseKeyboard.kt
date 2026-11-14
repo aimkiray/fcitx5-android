@@ -172,6 +172,12 @@ abstract class BaseKeyboard(
                                 true
                             }
                         }
+                        GestureType.Up -> {
+                            // notify CommonKeyActionListener so it can decide whether
+                            // a hold-to-talk voice input session should end
+                            onAction(KeyAction.VoiceInputHoldEnd)
+                            false
+                        }
                         else -> false
                     }
                 }
@@ -191,7 +197,9 @@ abstract class BaseKeyboard(
                             } else false
                         }
                         GestureType.Up -> {
-                            onAction(KeyAction.DeleteSelectionAction(event.totalX))
+                            // a cancelled Up must not delete the selection:
+                            // flag it so the action listener only resets state
+                            onAction(KeyAction.DeleteSelectionAction(event.totalX, event.cancelled))
                             false
                         }
                         else -> false
@@ -226,7 +234,10 @@ abstract class BaseKeyboard(
                         onGestureListener = OnGestureListener { view, event ->
                             when (event.type) {
                                 GestureType.Up -> {
-                                    if (!event.consumed && swipeSymbolDirection.checkY(event.totalY)) {
+                                    // a cancelled Up must not commit the swipe symbol
+                                    if (!event.cancelled && !event.consumed &&
+                                        swipeSymbolDirection.checkY(event.totalY)
+                                    ) {
                                         onAction(it.action)
                                         true
                                     } else {
@@ -264,7 +275,14 @@ abstract class BaseKeyboard(
                                     onPopupChangeFocus(view.id, event.x, event.y)
                                 }
                                 GestureType.Up -> {
-                                    onPopupTrigger(view.id)
+                                    // a cancelled Up must not commit the focused
+                                    // popup entry; only dismiss it
+                                    if (event.cancelled) {
+                                        onPopupAction(PopupAction.DismissAction(view.id))
+                                        false
+                                    } else {
+                                        onPopupTrigger(view.id)
+                                    }
                                 }
                                 else -> false
                             } || oldOnGestureListener.onGesture(view, event)
@@ -286,7 +304,14 @@ abstract class BaseKeyboard(
                                     onPopupChangeFocus(view.id, event.x, event.y)
                                 }
                                 GestureType.Up -> {
-                                    onPopupTrigger(view.id)
+                                    // a cancelled Up must not commit the focused
+                                    // popup key; only dismiss it
+                                    if (event.cancelled) {
+                                        onPopupAction(PopupAction.DismissAction(view.id))
+                                        false
+                                    } else {
+                                        onPopupTrigger(view.id)
+                                    }
                                 }
                                 else -> false
                             } || oldOnGestureListener.onGesture(view, event)

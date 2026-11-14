@@ -2,6 +2,9 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude
+            domain="sharedpref"
+            path="voice_secrets.xml" />
+        <exclude
             domain="file"
             path="usr" />
         <exclude
@@ -15,6 +18,9 @@
             path="README.md" />
     </cloud-backup>
     <device-transfer>
+        <exclude
+            domain="sharedpref"
+            path="voice_secrets.xml" />
         <exclude
             domain="file"
             path="usr" />

@@ -4,11 +4,13 @@
  */
 package org.fcitx.fcitx5.android.data.prefs
 
+import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
+import androidx.preference.PreferenceDataStore
 import androidx.preference.PreferenceManager
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.InputFeedbacks.InputFeedbackMode
@@ -22,6 +24,7 @@ import org.fcitx.fcitx5.android.input.keyboard.SpaceLongPressBehavior
 import org.fcitx.fcitx5.android.input.keyboard.SwipeSymbolDirection
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
 import org.fcitx.fcitx5.android.input.popup.EmojiModifier
+import org.fcitx.fcitx5.android.input.voice.VoiceInputManager
 import org.fcitx.fcitx5.android.utils.DeviceUtil
 import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.utils.vibrator
@@ -152,7 +155,13 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             switch(R.string.show_voice_input_button, "show_voice_input_button", false)
         val preferredVoiceInput = voiceInputPreference(
             R.string.preferred_voice_input, "preferred_voice_input", ""
-        ) { showVoiceInputButton.getValue() }
+        ) {
+            showVoiceInputButton.getValue() ||
+                spaceKeyLongPressBehavior.getValue() in setOf(
+                    SpaceLongPressBehavior.VoiceInput,
+                    SpaceLongPressBehavior.VoiceInputHold
+                )
+        }
 
         val expandKeypressArea =
             switch(R.string.expand_keypress_area, "expand_keypress_area", false)
@@ -371,6 +380,100 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         )
     }
 
+    inner class Voice : ManagedPreferenceCategory(R.string.voice_input_settings, sharedPreferences) {
+        // API key 存独立 SP 文件 voice_secrets.xml（明文，见规格 §6-R1），经
+        // data_extraction_rules/full_backup_content 排除以免进入云备份；
+        // 不得出现在代码字面量/BuildConfig。
+        private val voiceSecrets =
+            appContext.getSharedPreferences(VOICE_SECRETS_PREFS_NAME, Context.MODE_PRIVATE)
+
+        // androidx Preference UI 的读写也路由到 voice_secrets，绕过默认 SP
+        private val voiceSecretsDataStore = object : PreferenceDataStore() {
+            override fun putString(key: String, value: String?) {
+                voiceSecrets.edit { putString(key, value) }
+            }
+
+            override fun getString(key: String, defValue: String?): String? =
+                voiceSecrets.getString(key, defValue)
+        }
+
+        init {
+            // 迁移：旧版本误存默认 SP（会被云备份带走）的 key 挪到 voice_secrets 并清除。
+            // 仅旧值非空且 voice_secrets 尚无值时写入，防覆盖用户新值；
+            // 旧值可能不是 String（ClassCastException），runCatching 兜底；
+            // 无论迁移成败始终移除旧键；commit() 保证 crash 窗口内不丢一致性。
+            val legacyKey = "voice_input_dashscope_api_key"
+            val legacyValue = runCatching {
+                sharedPreferences.getString(legacyKey, "")
+            }.getOrNull()
+            if (!legacyValue.isNullOrEmpty() &&
+                voiceSecrets.getString(legacyKey, "").isNullOrEmpty()
+            ) {
+                voiceSecrets.edit(commit = true) { putString(legacyKey, legacyValue) }
+            }
+            if (sharedPreferences.contains(legacyKey)) {
+                sharedPreferences.edit(commit = true) { remove(legacyKey) }
+            }
+        }
+
+        // UI：EditTextPassword 掩码输入（init 块注册，保持 apiKey→model→language 顺序）。
+        val voiceInputDashscopeApiKey =
+            ManagedPreference.PString(
+                voiceSecrets, "voice_input_dashscope_api_key", ""
+            ).apply { register() }
+
+        init {
+            // CTO 修订（评审 M2）：三项 enableUiOn 统一为 builtin 被选中即可见
+            // （不绑定 showVoiceInputButton，空格长按用户也需要配置入口）。
+            ManagedPreferenceUi.EditTextPassword(
+                R.string.voice_dashscope_api_key,
+                voiceInputDashscopeApiKey.key,
+                "",
+                dataStore = voiceSecretsDataStore,
+                enableUiOn = {
+                    VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+                }
+            ).registerUi()
+        }
+
+        val voiceInputDashscopeModel = enumList(
+            R.string.voice_dashscope_model,
+            "voice_input_dashscope_model",
+            DashScopeModelEnum.QwenAudioStreaming
+        ) {
+            VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+        }
+
+        // partial 文本在编辑器内的实时预览模式（详见 FcitxInputMethodService
+        // .setVoiceComposingText 的注释——远程桌面类 TYPE_NULL 编辑器会把
+        // composing 当 commit 转发造成双重输入）
+        val voiceInputPreviewMode = enumList(
+            R.string.voice_preview_mode,
+            "voice_input_preview_mode",
+            VoicePreviewMode.Auto
+        ) {
+            VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+        }
+
+        // UI：EditTextString 普通输入。
+        val voiceInputDashscopeLanguage =
+            ManagedPreference.PString(
+                sharedPreferences, "voice_input_dashscope_language", ""
+            ).apply { register() }
+
+        init {
+            ManagedPreferenceUi.EditTextString(
+                R.string.voice_dashscope_language,
+                voiceInputDashscopeLanguage.key,
+                "",
+                hint = R.string.voice_dashscope_language_hint,
+                enableUiOn = {
+                    VoiceInputManager.isBuiltinId(keyboard.preferredVoiceInput.getValue())
+                }
+            ).registerUi()
+        }
+    }
+
     private val providers = mutableListOf<ManagedPreferenceProvider>()
 
     fun <T : ManagedPreferenceProvider> registerProvider(
@@ -390,6 +493,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
     val candidates = Candidates().register()
     val clipboard = Clipboard().register()
     val symbols = Symbols().register()
+    val voice = Voice().register()
     val advanced = Advanced().register()
 
     @Keep
@@ -428,6 +532,8 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
     }
 
     companion object {
+        private const val VOICE_SECRETS_PREFS_NAME = "voice_secrets"
+
         private var instance: AppPrefs? = null
 
         /**
@@ -442,4 +548,41 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
 
         fun getInstance() = instance!!
     }
+}
+
+/**
+ * 内置 DashScope 引擎可选模型（CTO 修订：只列流式可用模型——非流式 Generation
+ * 模型会让引擎 start() 直接报错，不该出现在候选）。
+ * [modelId] 为传给引擎的实际模型 ID；pref 存储的是枚举 name。
+ */
+enum class DashScopeModelEnum(
+    val modelId: String,
+    override val stringRes: Int
+) : ManagedPreferenceEnum {
+    FunAsrRealtime("fun-asr-realtime", R.string.voice_model_fun_asr_realtime),
+    QwenAudioStreaming(
+        "qwen-audio-3.0-asr-flash-streaming",
+        R.string.voice_model_qwen_audio_streaming
+    ),
+    QwenAudio31Streaming(
+        "qwen-audio-3.1-asr-flash-streaming",
+        R.string.voice_model_qwen_audio_31_streaming
+    ),
+    QwenAudio31Message(
+        "qwen-audio-3.1-asr-flash-message",
+        R.string.voice_model_qwen_audio_31_message
+    ),
+    Qwen3Realtime("qwen3-asr-flash-realtime", R.string.voice_model_qwen3_realtime),
+}
+
+/**
+ * 语音 partial 文本在编辑器内的预览模式。
+ * [Auto] 仅在检测为正常文本编辑器时预览（TYPE_NULL 类编辑器——如远程桌面
+ * App——把 setComposingText 当 commitText 转发，预览会产生双重输入）；
+ * [Always] 总是预览；[FinalOnly] 从不预览，只上屏最终修正文本。
+ */
+enum class VoicePreviewMode(override val stringRes: Int) : ManagedPreferenceEnum {
+    Auto(R.string.voice_preview_mode_auto),
+    Always(R.string.voice_preview_mode_always),
+    FinalOnly(R.string.voice_preview_mode_final_only),
 }
