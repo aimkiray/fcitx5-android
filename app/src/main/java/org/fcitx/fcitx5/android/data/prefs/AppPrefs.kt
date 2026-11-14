@@ -155,18 +155,6 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
 
         val showVoiceInputButton =
             switch(R.string.show_voice_input_button, "show_voice_input_button", false)
-        // 默认内置 DashScope 引擎（仍需用户填 API key 才真正可用；
-        // 未填时语音入口走 voice_error_no_api_key 提示）
-        val preferredVoiceInput = voiceInputPreference(
-            R.string.preferred_voice_input, "preferred_voice_input",
-            VoiceInputManager.BUILTIN_PROVIDER_ID
-        ) {
-            showVoiceInputButton.getValue() ||
-                spaceKeyLongPressBehavior.getValue() in setOf(
-                    SpaceLongPressBehavior.VoiceInput,
-                    SpaceLongPressBehavior.VoiceInputHold
-                )
-        }
 
         val expandKeypressArea =
             switch(R.string.expand_keypress_area, "expand_keypress_area", false)
@@ -423,6 +411,20 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             }
         }
 
+        // provider 选择器置顶——本页所有 provider 配置项的可见性都由它门控。
+        // 默认内置 DashScope（仍需用户填 API key；未填时语音入口走
+        // voice_error_no_api_key 提示）。
+        val preferredVoiceInput = voiceInputPreference(
+            R.string.preferred_voice_input, "preferred_voice_input",
+            VoiceInputManager.BUILTIN_PROVIDER_ID
+        ) {
+            keyboard.showVoiceInputButton.getValue() ||
+                keyboard.spaceKeyLongPressBehavior.getValue() in setOf(
+                    SpaceLongPressBehavior.VoiceInput,
+                    SpaceLongPressBehavior.VoiceInputHold
+                )
+        }
+
         // UI：EditTextPassword 掩码输入（init 块注册，保持 apiKey→model→language 顺序）。
         val voiceInputDashscopeApiKey =
             ManagedPreference.PString(
@@ -439,7 +441,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "",
                 dataStore = voiceSecretsDataStore,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_PROVIDER_ID
                 }
             ).registerUi()
@@ -450,7 +452,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_dashscope_model",
             DashScopeModelEnum.QwenAudio31Message
         ) {
-            keyboard.preferredVoiceInput.getValue() ==
+            preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_PROVIDER_ID
         }
 
@@ -462,7 +464,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_preview_mode",
             VoicePreviewMode.Auto
         ) {
-            keyboard.preferredVoiceInput.getValue() ==
+            preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_PROVIDER_ID
         }
 
@@ -479,7 +481,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "",
                 hint = R.string.voice_dashscope_language_hint,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_PROVIDER_ID
                 }
             ).registerUi()
@@ -500,7 +502,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "",
                 dataStore = voiceSecretsDataStore,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_SF_PROVIDER_ID
                 }
             ).registerUi()
@@ -511,7 +513,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_sf_model",
             SfAsrModelEnum.SenseVoiceSmall
         ) {
-            keyboard.preferredVoiceInput.getValue() ==
+            preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_SF_PROVIDER_ID
         }
 
@@ -539,7 +541,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_volc_use_new_auth",
             true
         ) {
-            keyboard.preferredVoiceInput.getValue() ==
+            preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID
         }
 
@@ -550,7 +552,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "",
                 dataStore = voiceSecretsDataStore,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID &&
                     voice.voiceInputVolcUseNewAuth.getValue()
                 }
@@ -561,7 +563,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "",
                 dataStore = voiceSecretsDataStore,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID &&
                     !voice.voiceInputVolcUseNewAuth.getValue()
                 }
@@ -572,7 +574,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "",
                 dataStore = voiceSecretsDataStore,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID &&
                     !voice.voiceInputVolcUseNewAuth.getValue()
                 }
@@ -585,7 +587,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_volc_model",
             VolcAsrModelEnum.DoubaoFileV2
         ) {
-            keyboard.preferredVoiceInput.getValue() ==
+            preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID
         }
 
@@ -595,7 +597,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_volc_ddc",
             false
         ) {
-            keyboard.preferredVoiceInput.getValue() ==
+            preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_VOLC_PROVIDER_ID
         }
 
@@ -608,7 +610,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 key = "voice_input_sv_download_model",
                 title = R.string.voice_sv_download_model,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_SV_PROVIDER_ID
                 }
             ).registerUi()
@@ -620,7 +622,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "voice_input_sv_use_mirror",
             false
         ) {
-            keyboard.preferredVoiceInput.getValue() ==
+            preferredVoiceInput.getValue() ==
                 VoiceInputManager.BUILTIN_SV_PROVIDER_ID
         }
 
@@ -630,7 +632,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 key = "voice_input_sv_clear_model",
                 title = R.string.voice_sv_clear_model,
                 enableUiOn = {
-                    keyboard.preferredVoiceInput.getValue() ==
+                    preferredVoiceInput.getValue() ==
                         VoiceInputManager.BUILTIN_SV_PROVIDER_ID
                 }
             ).registerUi()

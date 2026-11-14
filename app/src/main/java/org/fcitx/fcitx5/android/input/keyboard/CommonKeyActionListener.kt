@@ -66,7 +66,7 @@ class CommonKeyActionListener :
 
     private val spaceKeyLongPressBehavior by kbdPrefs.spaceKeyLongPressBehavior
     private val langSwitchKeyBehavior by kbdPrefs.langSwitchKeyBehavior
-    private val preferredVoiceInput by kbdPrefs.preferredVoiceInput
+    private val preferredVoiceInput by AppPrefs.getInstance().voice.preferredVoiceInput
 
     private var backspaceSwipeState = Stopped
 

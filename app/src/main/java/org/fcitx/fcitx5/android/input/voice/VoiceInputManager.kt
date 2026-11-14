@@ -130,7 +130,7 @@ object VoiceInputManager {
                 // DashScope 仅需自有 key；SiliconFlow 自有 key 与内置
                 // BuildConfig key 双轨，均空才阻断（引擎 start() 内再兜底）
                 val prefs = AppPrefs.getInstance()
-                val providerId = prefs.keyboard.preferredVoiceInput.getValue()
+                val providerId = prefs.voice.preferredVoiceInput.getValue()
                 val keyMissing = when (providerId) {
                     BUILTIN_PROVIDER_ID ->
                         prefs.voice.voiceInputDashscopeApiKey.getValue().isBlank()
@@ -217,7 +217,7 @@ object VoiceInputManager {
         // gen 守卫与迟到回调口径一致，防快速 stop 后 show 落到新会话
         if (gen == sessionGen) voiceOverlayShowCallback?.invoke()
         val prefs = AppPrefs.getInstance()
-        val providerId = prefs.keyboard.preferredVoiceInput.getValue()
+        val providerId = prefs.voice.preferredVoiceInput.getValue()
 
         // start() 失败回滚时的双 toast 防护（评审 A-L4）：四个引擎的 start()
         // 校验失败都会同步调 onError（已带具体错误文案），回滚分支据此
