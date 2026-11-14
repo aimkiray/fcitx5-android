@@ -337,7 +337,7 @@
     <string name="voice_mic_permission">麦克风权限</string>
     <string name="voice_mic_permission_granted">已授予</string>
     <string name="voice_mic_permission_denied">未授予，点击申请</string>
-    <string name="voice_settings_hint">需先在键盘设置中将“首选语音输入”选为内置服务</string>
+    <string name="voice_settings_hint">以下配置项在“首选语音输入”中选择对应引擎后可用</string>
     <string name="voice_preview_mode">识别文字实时预览</string>
     <string name="voice_preview_mode_auto">自动（不兼容应用不预览）</string>
     <string name="voice_preview_mode_always">总是预览</string>

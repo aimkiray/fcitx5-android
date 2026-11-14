@@ -337,7 +337,7 @@
     <string name="voice_mic_permission">Microphone permission</string>
     <string name="voice_mic_permission_granted">Granted</string>
     <string name="voice_mic_permission_denied">Not granted, tap to request</string>
-    <string name="voice_settings_hint">Set “Preferred voice input” to a built-in service in keyboard settings first</string>
+    <string name="voice_settings_hint">The options below become available when their engine is selected in “Preferred voice input”</string>
     <string name="voice_preview_mode">Recognition preview in editor</string>
     <string name="voice_preview_mode_auto">Auto (off for incompatible apps)</string>
     <string name="voice_preview_mode_always">Always show</string>

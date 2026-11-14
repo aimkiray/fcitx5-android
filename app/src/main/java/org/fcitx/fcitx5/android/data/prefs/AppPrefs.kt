@@ -680,7 +680,10 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 internal.editorInfoInspector,
                 advanced.ignoreSystemCursor,
                 advanced.disableAnimation,
-                advanced.vivoKeypressWorkaround
+                advanced.vivoKeypressWorkaround,
+                // 单项同步而非整类 voice：后者会把 voiceSecrets 支撑的
+                // API key 明文写入设备加密存储
+                voice.preferredVoiceInput
             ).forEach {
                 it.putValueTo(this@edit)
             }

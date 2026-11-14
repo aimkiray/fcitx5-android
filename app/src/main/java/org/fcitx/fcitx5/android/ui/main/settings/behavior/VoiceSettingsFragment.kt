@@ -34,7 +34,7 @@ class VoiceSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().v
         // 常驻说明：以下配置项仅在内置引擎被选为首选语音输入时可用
         screen.addPreference(Preference(ctx).apply {
             key = "voice_settings_hint"
-            order = 0
+            order = -2
             isIconSpaceReserved = false
             isSelectable = false
             setTitle(R.string.voice_settings_hint)
@@ -42,7 +42,7 @@ class VoiceSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().v
         // 麦克风权限：显示授予状态；未授予时点击发起运行时申请，已授予时跳应用详情页
         micPermissionPreference = Preference(ctx).apply {
             key = "voice_mic_permission"
-            order = 1
+            order = -1
             isIconSpaceReserved = false
             setTitle(R.string.voice_mic_permission)
             setOnPreferenceClickListener {
